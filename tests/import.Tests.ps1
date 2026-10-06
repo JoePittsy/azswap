@@ -68,7 +68,7 @@ Describe 'azswap import' {
             (Get-Row $rows devops).Status | Should -Be 'skipped: not an az config folder'
             (Get-Row $rows list).Status | Should -Match "is a command name"
             Get-Row $rows done | Should -BeNullOrEmpty
-            Get-ChildItem $TestDrive -Recurse -Filter 'azswap-*' | Should -HaveCount 1
+            Get-ChildItem $TestDrive -Recurse -Force -Filter 'azswap-*' | Should -HaveCount 1
         }
 
         It 'writes tenant and account with -Apply, and leaves other files alone' {
