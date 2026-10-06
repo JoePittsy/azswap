@@ -84,10 +84,44 @@ Describe 'azswap import' {
             azswap list | Out-String | Should -Match 'contoso'
         }
 
-        It 'does not overwrite an existing azswap-account' {
-            Set-Content (Join-Path $TestDrive '.azure-contoso\azswap-account') 'other@contoso.com'
-            azswap import -Apply | Out-Null
-            Get-Content (Join-Path $TestDrive '.azure-contoso\azswap-account') | Should -Be 'other@contoso.com'
+        It 'does not overwrite an existing azswap-account holding <Label>' -ForEach @(
+            @{ Label = 'an account'; Content = 'other@contoso.com' }
+            @{ Label = 'whitespace'; Content = "  `r`n" }
+            @{ Label = 'nothing'; Content = '' }
+        ) {
+            $file = Join-Path $TestDrive '.azure-contoso\azswap-account'
+            [IO.File]::WriteAllText($file, $Content)
+            (Get-Row (azswap import -Apply) contoso).Status | Should -Be 'registered'
+            [IO.File]::ReadAllText($file) | Should -BeExactly $Content
+        }
+
+        It 'keeps the tenant but not an account when one tenant has two accounts and no default' {
+            New-AzFolder '.azure-shared' @(@('a@s.com', 'tid-s', $false), @('b@s.com', 'tid-s', $false)) | Out-Null
+            $row = Get-Row (azswap import -Only shared -Apply) shared
+            $row.Tenant | Should -Be 'tid-s'
+            $row.Account | Should -BeNullOrEmpty
+            Get-Content (Join-Path $TestDrive '.azure-shared\azswap-tenant') | Should -Be 'tid-s'
+            Test-Path (Join-Path $TestDrive '.azure-shared\azswap-account') | Should -BeFalse
+        }
+
+        It 'reports a failed write and carries on with the other folders' {
+            Mock Write-AzswapSetting -ModuleName azswap {
+                if ($Dir -like '*.azure-contoso') { throw 'Access denied' }
+                Set-Content (Join-Path $Dir "azswap-$Name") $Value
+            }
+            $rows = azswap import -Apply
+            (Get-Row $rows contoso).Status | Should -Be 'failed: Access denied'
+            (Get-Row $rows onetenant).Status | Should -Be 'registered'
+        }
+
+        It 'treats a real non-terminating write error as a failure' {
+            # Set-Content under a path that is a file fails without throwing on its own.
+            $notADir = Join-Path $TestDrive 'plain-file'
+            Set-Content $notADir 'x'
+            InModuleScope azswap -Parameters @{ Dir = $notADir } {
+                Write-AzswapImport -Dir $Dir -Tenant 'tid' -Account 'me@x.com' 2>$null
+            } | Should -Match '^failed: '
+            Test-Path $notADir -PathType Leaf | Should -BeTrue
         }
 
         It 'limits itself to -Only' {
@@ -144,6 +178,17 @@ Describe 'azswap import' {
             $rows = azswap import -FromDefault -Apply
             (Get-Row $rows contosoltd).Status | Should -Be 'skipped: .azure-contosoltd already exists'
             Get-ChildItem (Join-Path $TestDrive '.azure-contosoltd') -Force | Should -BeNullOrEmpty
+            (Get-Row $rows fabrikam-me).Status | Should -Match '^created'
+        }
+
+        It 'removes a folder it created when the tenant write fails, and carries on' {
+            Mock Write-AzswapSetting -ModuleName azswap {
+                if ($Dir -like '*.azure-contosoltd') { throw 'Access denied' }
+                Set-Content (Join-Path $Dir "azswap-$Name") $Value
+            }
+            $rows = azswap import -FromDefault -Apply
+            (Get-Row $rows contosoltd).Status | Should -Be 'failed: Access denied'
+            Test-Path (Join-Path $TestDrive '.azure-contosoltd') | Should -BeFalse
             (Get-Row $rows fabrikam-me).Status | Should -Match '^created'
         }
 

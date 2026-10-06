@@ -63,7 +63,7 @@ function Get-AzswapSubscription {
 # A profile name from a domain or account: lower case, letters, digits and dashes only.
 function ConvertTo-AzswapName {
     param([string]$Text)
-    ($Text.ToLower() -replace '[^a-z0-9-]+', '-').Trim('-')
+    ($Text.ToLowerInvariant() -replace '[^a-z0-9-]+', '-').Trim('-')
 }
 
 # One candidate profile per identity in ~/.azure (-FromDefault).
@@ -118,17 +118,42 @@ function Get-AzswapImportFolder {
         ForEach-Object {
             $subs = @(Get-AzswapSubscription $_.FullName)
             $sub = $subs | Where-Object isDefault | Select-Object -First 1
-            if (-not $sub -and @($subs.tenantId | Select-Object -Unique).Count -eq 1) { $sub = $subs[0] }
+            $tenant, $account = $sub.tenantId, $sub.user.name
+            if (-not $sub -and @($subs.tenantId | Sort-Object -Unique).Count -eq 1) {
+                # No default but only one tenant: the account only if every subscription agrees.
+                $tenant = $subs[0].tenantId
+                $account = if (@($subs.user.name | Sort-Object -Unique).Count -eq 1) { $subs[0].user.name }
+            }
             $isAz = (Test-Path (Join-Path $_.FullName 'config')) -or (Test-Path (Join-Path $_.FullName 'azureProfile.json'))
             [pscustomobject]@{
                 Profile = $_.Name.Substring(7)
-                Account = $sub.user.name
-                Tenant  = $sub.tenantId
+                Account = $account
+                Tenant  = $tenant
                 Reason  = if (-not $isAz) { 'not an az config folder' }
                           elseif (-not $subs) { 'no profile data; sign in to it first' }
-                          elseif (-not $sub) { 'several tenants and no default subscription' }
+                          elseif (-not $tenant) { 'several tenants and no default subscription' }
             }
         }
+}
+
+# Writes one import row's files. Returns nothing on success, or "failed: <reason>".
+# An existing azswap-account is never overwritten, whatever it holds.
+function Write-AzswapImport {
+    param([string]$Dir, [string]$Tenant, [string]$Account, [switch]$Create)
+    $ErrorActionPreference = 'Stop'
+    $created = $false
+    try {
+        if ($Create) { New-Item -ItemType Directory $Dir | Out-Null; $created = $true }
+        Write-AzswapSetting -Dir $Dir -Name 'tenant' -Value $Tenant
+        if ($Account -and -not (Test-Path (Join-Path $Dir 'azswap-account'))) {
+            Write-AzswapSetting -Dir $Dir -Name 'account' -Value $Account
+        }
+    }
+    catch {
+        # Only a folder created by this call, which holds nothing but azswap-* files.
+        if ($created) { Remove-Item $Dir -Recurse -Force -ErrorAction SilentlyContinue }
+        "failed: $($_.Exception.Message)"
+    }
 }
 
 function Show-AzswapAccount {
@@ -289,14 +314,9 @@ function azswap {
                 $status = if ($_.Exists) { "exists: $($_.Exists)" }
                           elseif ($_.Reason) { "skipped: $($_.Reason)" }
                           elseif (-not $Apply) { if ($FromDefault) { 'would create' } else { 'would register' } }
-                          else {
-                              if ($FromDefault) { New-Item -ItemType Directory $dir | Out-Null }
-                              Write-AzswapSetting -Dir $dir -Name 'tenant' -Value $_.Tenant
-                              if ($_.Account -and -not (Get-AzswapSetting -Dir $dir -Name 'account')) {
-                                  Write-AzswapSetting -Dir $dir -Name 'account' -Value $_.Account
-                              }
-                              if ($FromDefault) { "created; sign in with: azswap $($_.Profile)" } else { 'registered' }
-                          }
+                          elseif ($failed = Write-AzswapImport -Dir $dir -Tenant $_.Tenant -Account $_.Account -Create:$FromDefault) { $failed }
+                          elseif ($FromDefault) { "created; sign in with: azswap $($_.Profile)" }
+                          else { 'registered' }
                 [pscustomobject]@{ Profile = $_.Profile; Account = $_.Account; Tenant = $_.Tenant; Status = $status }
             }
         }
