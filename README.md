@@ -140,11 +140,11 @@ detected. They must pass `-NoLogin`, which gives the same behaviour anywhere.
 
 In that mode `azswap <profile>` still switches. If the token has expired, it fails with
 an error naming the command to run in your own terminal, such as `azswap contoso`, and
-doesn't print the account. `azswap login` fails the same way, and `azswap new` creates
-the profile without signing in.
+doesn't print the account. `azswap login` fails the same way, suggesting
+`azswap contoso; azswap login`, and `azswap new` creates the profile without signing in.
 
 The failure is a normal PowerShell error: `$?` is false, `$LASTEXITCODE` is 1, and
-`pwsh -Command` exits with 1. A `pwsh -File` script exits non-zero only if it stops on
+`pwsh -Command` exits with 1. A sign-in that `az login` itself rejects fails the same way. A `pwsh -File` script exits non-zero only if it stops on
 errors (`$ErrorActionPreference = 'Stop'`, or `-ErrorAction Stop` on the call), as with
 any other PowerShell error.
 
