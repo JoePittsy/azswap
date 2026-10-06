@@ -81,9 +81,16 @@ azswap <name>
 ```
 
 `azswap <name>` switches that shell to the profile, tests the token, and if it has expired
-signs in to the profile's tenant (device code by default; `-Interactive` for browser
-sign-in, which tenants with device-compliance Conditional Access require). It then
-prints the account, so they can confirm it's the right identity.
+signs in to the profile's tenant with the profile's remembered method: device code,
+unless an interactive sign-in has succeeded through `azswap new ... -Interactive` or
+`azswap login -Interactive`. It then prints the account, so they can confirm it's the
+right identity.
+
+- If the sign-in fails with `AADSTS53003`, `AADSTS50097` or another Conditional Access
+  error, the tenant blocks device code. Give the user `azswap login -Interactive`
+  instead: it signs in through the browser and, once that succeeds, the profile
+  remembers it, so plain `azswap <name>` works from then on. A refused or failed
+  sign-in records nothing.
 
 - Set the profile's default subscription once with `az account set --subscription "<name>"`,
   so later calls don't need `--subscription`.
@@ -92,7 +99,8 @@ prints the account, so they can confirm it's the right identity.
 
 1. Choose a short name and add a row to both tables above.
 2. The user runs `azswap new <name> <tenant>` (with `-Interactive` if the tenant blocks
-   device code). It creates the folder, records the tenant and signs in.
+   device code; the profile remembers it once that first sign-in succeeds). It creates
+   the folder, records the tenant and signs in.
 3. Check the account it prints, then set the default subscription.
 
 If the customer is already signed in to an old `~/.azure-<name>` folder or the default

@@ -6,11 +6,12 @@ you running commands as the wrong account in the wrong tenant.
 
 ```text
 azswap                            Show the current profile and signed-in account
-azswap <profile> [-Interactive] [-NoLogin]
+azswap <profile> [-Interactive|-DeviceCode] [-NoLogin]
                                   Switch profile; sign in if the token has expired
 azswap list                       List profiles with account, subscription and tenant
-azswap new <profile> <tenant>     Create a profile and sign in
-azswap login [-Interactive] [-NoLogin]
+azswap new <profile> <tenant> [-Interactive|-DeviceCode]
+                                  Create a profile and sign in
+azswap login [-Interactive|-DeviceCode] [-NoLogin]
                                   Sign in to the current profile again
 azswap help                       Show help (also -h, --help)
 azswap import [-Apply]            Adopt existing ~/.azure-* folders as profiles
@@ -126,6 +127,20 @@ embedded ones. Tenants with Conditional Access policies that require a compliant
 hybrid-joined device reject device-code sign-in, so use `-Interactive` for those. On
 Windows that goes through the Web Account Manager (WAM) broker.
 
+Each profile remembers its method, so you only say it once. A method you name on `new`
+or `login` is recorded in an `azswap-login` file in the profile folder once a sign-in
+with it succeeds:
+
+- `azswap new <profile> <tenant> -Interactive` records `interactive`.
+- `azswap login -Interactive` or `azswap login -DeviceCode` signs in that way and
+  records it, which is how you change an existing profile.
+- `azswap <profile> -Interactive` or `-DeviceCode` overrides the method for that one
+  sign-in without changing what's recorded.
+
+A refused or failed sign-in records nothing. A profile with no `azswap-login` file
+uses device code. If a device-code sign-in fails, `azswap` suggests
+`azswap login -Interactive`.
+
 ## Scripts, CI and agents
 
 `azswap` never starts a sign-in from a non-interactive host, where it would hang on a
@@ -147,6 +162,10 @@ The failure is a normal PowerShell error: `$?` is false, `$LASTEXITCODE` is 1, a
 `pwsh -Command` exits with 1. A sign-in that `az login` itself rejects fails the same way. A `pwsh -File` script exits non-zero only if it stops on
 errors (`$ErrorActionPreference = 'Stop'`, or `-ErrorAction Stop` on the call), as with
 any other PowerShell error.
+
+A refused sign-in records no method. If `azswap new ... -Interactive` or
+`azswap login -Interactive` is refused, run `azswap login -Interactive` in your own
+terminal to sign in and record it.
 
 ## Things that ignore `azswap`
 
