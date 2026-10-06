@@ -67,6 +67,12 @@ AZURE_CONFIG_DIR=~/.azure-<name> az account show --query "{user:user.name,sub:na
 - `Please run 'az login'` or an `AADSTS` error → the session has expired. **Stop**
   and give the user the sign-in line below. Do not continue against another profile.
 - The wrong account → stop and say so. Never "make do" with whichever identity works.
+- `azswap` itself warns `WRONG ACCOUNT: ...` when a profile is signed in as someone other
+  than its expected account, and `azswap list` marks the profile with `!`. Treat either as
+  **stop and tell the user**: quote the warning and ask which account is right. Don't
+  assume the recorded account is the right one, and never run
+  `azswap <name> -Account ...` to silence the warning until the user has confirmed the
+  account. `No expected account for '<name>'` means the same: ask the user to confirm it.
 
 ## Signing in (the user runs this, never a tool call)
 
@@ -98,9 +104,9 @@ right identity.
 ## Adding a customer
 
 1. Choose a short name and add a row to both tables above.
-2. The user runs `azswap new <name> <tenant>` (with `-Interactive` if the tenant blocks
-   device code; the profile remembers it once that first sign-in succeeds). It creates
-   the folder, records the tenant and signs in.
+2. The user runs `azswap new <name> <tenant> -Account <upn>` (with `-Interactive` if the
+   tenant blocks device code; the profile remembers it once that first sign-in succeeds).
+   It creates the folder, records the tenant and the expected account, and signs in.
 3. Check the account it prints, then set the default subscription.
 
 If the customer is already signed in to an old `~/.azure-<name>` folder or the default
