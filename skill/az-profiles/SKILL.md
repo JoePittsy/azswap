@@ -130,8 +130,8 @@ to any profile it creates is still the user's job (`azswap <name>`).
 
 - **Other tools still use `~/.azure`.** The VS Code Azure extensions, Azure Functions
   Core Tools and `DefaultAzureCredential` (through `AzureCliCredential`) ignore these
-  folders unless `AZURE_CONFIG_DIR` is set in the process that starts them. `azswap run <name> -- func start`
-  (or `-- code .`) starts one under a profile.
+  folders unless `AZURE_CONFIG_DIR` is set in the process that starts them.
+  `azswap run <name> -- func start` (or `-- code .`) starts one under a profile.
 - **`AZURE_DEVOPS_EXT_PAT` overrides the profile's sign-in** for `az devops` / `az boards`
   if it is set. Unset it when the board answers as the wrong user.
 - On Windows, `az` output can pass through cp1252, so non-ASCII characters in
