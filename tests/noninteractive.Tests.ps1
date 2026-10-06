@@ -174,6 +174,12 @@ Describe 'interactive sign-in' {
         & (Get-Module azswap) { param($d) $ErrorActionPreference = 'SilentlyContinue'; Invoke-AzswapLogin -Dir $d -NoLogin } $dir |
             Should -BeNullOrEmpty
     }
+
+    It 'Invoke-AzswapLogin falls back to Write-Error without -Cmdlet' {
+        $dir = New-TestProfile contoso 'tid-1'
+        $out = & (Get-Module azswap) { param($d) $ErrorActionPreference = 'Continue'; Invoke-AzswapLogin -Dir $d -NoLogin 2>&1 } $dir
+        $out.FullyQualifiedErrorId | Should -Match '^AzswapLoginRefused'
+    }
 }
 
 Describe 'Test-AzswapNonInteractiveArg' {

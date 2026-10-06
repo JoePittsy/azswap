@@ -208,10 +208,11 @@ function Test-AzswapInteractive {
 # az's stdout must stay the terminal, or az drops its subscription picker. Success is
 # $LASTEXITCODE -eq 0 afterwards. In a non-interactive host, or with -NoLogin, it never runs
 # az login: it writes an AzswapLoginRefused error naming the command for a human to run and
-# sets $LASTEXITCODE to 1.
+# sets $LASTEXITCODE to 1. Pass the calling azswap's $PSCmdlet as -Cmdlet: the error then goes
+# through it, so the azswap call itself fails ($? is false, pwsh -Command exits 1).
 function Invoke-AzswapLogin {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidGlobalVars', '', Justification = 'LASTEXITCODE is how callers and scripts read the result')]
-    param([string]$Dir, [switch]$Interactive, [switch]$NoLogin)
+    param([string]$Dir, [switch]$Interactive, [switch]$NoLogin, [Management.Automation.PSCmdlet]$Cmdlet)
     if ($NoLogin -or -not (Test-AzswapInteractive)) {
         $global:LASTEXITCODE = 1
         $why = if ($NoLogin) { '-NoLogin was given' } else { 'this host is non-interactive' }
@@ -221,9 +222,7 @@ function Invoke-AzswapLogin {
         $rec = [Management.Automation.ErrorRecord]::new(
             [Exception]::new("Sign-in needed, but $why. Run this in your own terminal: $cmd"),
             'AzswapLoginRefused', 'AuthenticationError', $Dir)
-        # $PSCmdlet here is the calling azswap's (dynamic scope). Writing through it makes the
-        # azswap call itself fail: $? is false and pwsh -Command exits 1.
-        if ($PSCmdlet) { $PSCmdlet.WriteError($rec) } else { Write-Error -ErrorRecord $rec }
+        if ($Cmdlet) { $Cmdlet.WriteError($rec) } else { Write-Error -ErrorRecord $rec }
         return
     }
     $loginArgs = @('login', '--tenant', (Get-AzswapSetting -Dir $Dir -Name 'tenant'), '-o', 'none')
@@ -413,7 +412,7 @@ function azswap {
             if (-not (Test-Path (Join-Path $env:AZURE_CONFIG_DIR 'azswap-tenant'))) {
                 return Write-Error "'$env:AZURE_CONFIG_DIR' isn't an azswap profile. Run 'azswap <profile>'."
             }
-            Invoke-AzswapLogin -Dir $env:AZURE_CONFIG_DIR -Interactive:$Interactive -NoLogin:$NoLogin
+            Invoke-AzswapLogin -Dir $env:AZURE_CONFIG_DIR -Interactive:$Interactive -NoLogin:$NoLogin -Cmdlet $PSCmdlet
             if ($LASTEXITCODE -ne 0) { return }
             return Show-AzswapAccount
         }
@@ -425,7 +424,7 @@ function azswap {
             $env:AZURE_CONFIG_DIR = $dir
             az account get-access-token -o none 2>$null
             if ($LASTEXITCODE -ne 0) {
-                Invoke-AzswapLogin -Dir $dir -Interactive:$Interactive -NoLogin:$NoLogin
+                Invoke-AzswapLogin -Dir $dir -Interactive:$Interactive -NoLogin:$NoLogin -Cmdlet $PSCmdlet
                 if ($LASTEXITCODE -ne 0) { return }
             }
             return Show-AzswapAccount
