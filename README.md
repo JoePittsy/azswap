@@ -29,13 +29,32 @@ profile's tenant in an `azswap-tenant` file inside it. `azswap <profile>` then:
 
 There's no shared state between shells: each window can use a different profile.
 
+Profile folders live in your home folder. Set the `AZSWAP_HOME` environment variable to
+keep them somewhere else; `azswap` then looks for `$env:AZSWAP_HOME/.azure-<profile>`.
+The tests use it to work in a scratch folder.
+
+`Get-Help azswap -Full` has the full reference and examples.
+
 ## Install
 
-Requires PowerShell 7 and the [Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli).
+Requires PowerShell 7 or Windows PowerShell 5.1, and the
+[Azure CLI](https://learn.microsoft.com/cli/azure/install-azure-cli).
+
+```powershell
+Install-Module azswap -Scope CurrentUser
+Add-Content $PROFILE 'Import-Module azswap'
+. $PROFILE
+```
+
+PowerShell would autoload the module the first time you run `azswap`, but tab completion
+is registered when the module is imported, so it only appears after that first run.
+The `Import-Module` line in `$PROFILE` gives you completion from the start.
+
+### From source
 
 ```powershell
 git clone https://github.com/JoePittsy/azswap.git
-Add-Content $PROFILE ". `"$PWD\azswap\azswap.ps1`""
+Add-Content $PROFILE "Import-Module `"$PWD\azswap\azswap\azswap.psd1`""
 . $PROFILE
 ```
 
@@ -97,6 +116,24 @@ What azswap adds is that each profile knows its tenant, so an expired session si
 straight back in to the right place. The Claude Code skill also picks the profile
 from context (the repo you're in, the ADO org or the customer you mention) instead of
 asking.
+
+## Development
+
+```powershell
+Invoke-Pester ./tests                                          # Pester 5
+Invoke-ScriptAnalyzer ./azswap -Recurse -Settings PSGallery
+```
+
+The tests mock `az` and point `AZSWAP_HOME` at a scratch folder, so they never touch
+your real profiles or sign in. CI runs both on Windows and Ubuntu.
+
+### Releasing
+
+1. Bump `ModuleVersion` in [`azswap/azswap.psd1`](azswap/azswap.psd1) and commit.
+2. Tag the commit `vX.Y.Z` to match, and push the tag: `git push origin vX.Y.Z`.
+3. The Publish workflow runs the tests, checks the tag matches the manifest, and
+   publishes to the PowerShell Gallery. It needs a Gallery API key in the
+   `PSGALLERY_API_KEY` repository secret.
 
 ## Licence
 

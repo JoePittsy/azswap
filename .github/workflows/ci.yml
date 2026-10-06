@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: ['**'] # tags run this through publish.yml instead
+  pull_request:
+  workflow_call:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Pester 5 and PSScriptAnalyzer
+        run: |
+          Set-PSRepository PSGallery -InstallationPolicy Trusted
+          Install-Module Pester -MinimumVersion 5.0.0 -MaximumVersion 5.99.99 -Scope CurrentUser -SkipPublisherCheck
+          Install-Module PSScriptAnalyzer -Scope CurrentUser
+
+      - name: Test manifest
+        run: Test-ModuleManifest ./azswap/azswap.psd1
+
+      - name: ScriptAnalyzer
+        run: |
+          $results = Invoke-ScriptAnalyzer -Path ./azswap -Recurse -Settings PSGallery
+          $results | Format-Table -AutoSize
+          if ($results) { throw "ScriptAnalyzer found $(@($results).Count) issue(s)." }
+
+      - name: Pester
+        run: |
+          Import-Module Pester -MaximumVersion 5.99.99
+          $config = New-PesterConfiguration
+          $config.Run.Path = './tests'
+          $config.Run.Exit = $true
+          $config.Output.Verbosity = 'Detailed'
+          Invoke-Pester -Configuration $config
