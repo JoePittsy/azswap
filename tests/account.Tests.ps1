@@ -80,9 +80,9 @@ Describe 'account check' {
             Get-Expected contoso | Should -Be 'me@contoso.com'
         }
 
-        It 'treats an empty azswap-account file as not set' {
+        It 'treats an azswap-account file holding <_> as not set' -ForEach @('', '   ', "`r`n") {
             $dir = New-TestProfile contoso 'tid-1'
-            New-Item (Join-Path $dir 'azswap-account') -ItemType File | Out-Null
+            [IO.File]::WriteAllText((Join-Path $dir 'azswap-account'), $_)
             InModuleScope azswap -Parameters @{ dir = $dir } {
                 Test-AzswapAccount -Dir $dir -WarningVariable w -WarningAction SilentlyContinue | Should -BeTrue
                 "$w" | Should -Match "No expected account for 'contoso'"
@@ -125,6 +125,12 @@ Describe 'account check' {
             Get-Expected contoso | Should -Be 'me@contoso.com'
         }
 
+        It 'records the account after a successful azswap login' {
+            $env:AZURE_CONFIG_DIR = New-TestProfile contoso 'tid-1'
+            azswap login 6>$null | Out-Null
+            Get-Expected contoso | Should -Be 'me@contoso.com'
+        }
+
         It 'records nothing and does not check after a failed sign-in' {
             New-TestProfile contoso 'tid-1' | Out-Null
             Mock az -ModuleName azswap { $global:LASTEXITCODE = 1 } -ParameterFilter { $args[0] -eq 'account' -and $args[1] -eq 'get-access-token' }
@@ -162,10 +168,30 @@ Describe 'account check' {
             "$w" | Should -Match 'expects admin@fabrikam\.com'
         }
 
-        It 'rejects -Account with <_>' -ForEach @('', 'list') {
+        It 'rejects -Account with <_>' -ForEach @('', 'list', 'import', 'help', '--help') {
             { azswap $_ -Account me@contoso.com -ErrorAction Stop } | Should -Throw '-Account works with*'
         }
+
+        It 'rejects -Account with -Help' {
+            { azswap contoso -Help -Account me@contoso.com -ErrorAction Stop } | Should -Throw '-Account works with*'
+        }
+
+        It 'rejects a blank -Account and keeps the expected account' -ForEach @(
+            @{ Run = { azswap contoso -Account '  ' -ErrorAction Stop } }
+            @{ Run = { $env:AZURE_CONFIG_DIR = Join-Path $TestDrive '.azure-contoso'; azswap login -Account '' -ErrorAction Stop } }
+        ) {
+            New-TestProfile contoso 'tid-1' -Expected 'admin@contoso.com' | Out-Null
+            $Run | Should -Throw '-Account needs an account*'
+            Get-Expected contoso | Should -Be 'admin@contoso.com'
+            Should -Invoke az -ModuleName azswap -Times 0 -Exactly
+        }
+
+        It 'new rejects a blank -Account before creating anything' {
+            { azswap new fabrikam 'tid-2' -Account ' ' -ErrorAction Stop } | Should -Throw '-Account needs an account*'
+            Join-Path $TestDrive '.azure-fabrikam' | Should -Not -Exist
+        }
     }
+
 
     Context 'list' {
         It 'flags a mismatch offline, without calling az' {

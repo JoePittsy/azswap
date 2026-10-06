@@ -11,7 +11,7 @@ azswap <profile> [-Interactive|-DeviceCode] [-NoLogin] [-Account <upn>]
 azswap list                       List profiles with account, subscription and tenant
 azswap new <profile> <tenant> [-Interactive|-DeviceCode] [-Account <upn>]
                                   Create a profile and sign in
-azswap login [-Interactive|-DeviceCode] [-NoLogin]
+azswap login [-Interactive|-DeviceCode] [-NoLogin] [-Account <upn>]
                                   Sign in to the current profile again
 azswap help                       Show help (also -h, --help)
 azswap import [-Apply]            Adopt existing ~/.azure-* folders as profiles

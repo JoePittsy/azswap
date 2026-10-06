@@ -12,7 +12,7 @@ Usage:
   azswap list                       List profiles with account, subscription and tenant
   azswap new <profile> <tenant> [-Interactive|-DeviceCode] [-Account <upn>]
                                     Create a profile and sign in
-  azswap login [-Interactive|-DeviceCode] [-NoLogin]
+  azswap login [-Interactive|-DeviceCode] [-NoLogin] [-Account <upn>]
                                     Sign in to the current profile again
   azswap help                       Show this help (also -h, --help)
   azswap import [-Apply]            Adopt existing ~/.azure-* folders as profiles
@@ -454,11 +454,16 @@ function azswap {
         [string[]]$Only
     )
 
+    if ($PSBoundParameters.ContainsKey('Account')) {
+        $Account = $Account.Trim()
+        if (-not $Account) { return Write-Error '-Account needs an account, such as user@contoso.com.' }
+        if ($Help -or $Command -in '', 'list', 'import', 'help', '--help') { return Write-Error '-Account works with new, login or a profile name.' }
+    }
     if ($Help -or $Command -in 'help', '--help') { return $script:Usage }
     if ($Interactive -and $DeviceCode) { return Write-Error 'Use -Interactive or -DeviceCode, not both.' }
     # 'new' and 'login' remember an explicit method once a sign-in with it succeeds.
     $method = if ($Interactive) { 'interactive' } elseif ($DeviceCode) { 'devicecode' }
-    if ($Account -and $Command -in '', 'list', 'import') { return Write-Error '-Account works with new, login or a profile name.' }
+    $accountArg = if ($Account) { @{ Account = $Account } } else { @{} }
 
     switch ($Command) {
         '' {
@@ -496,7 +501,7 @@ function azswap {
             # Re-emit the inner call's sign-in errors through this call, so 'azswap new' itself fails
             # too. Only those: Windows PowerShell also records az's discarded stderr as errors.
             # Not captured: az login must keep the terminal. A new folder has no token, so this signs in.
-            azswap $Target -Interactive:$Interactive -DeviceCode:$DeviceCode -NoLogin:$NoLogin -Account $Account -ErrorAction SilentlyContinue -ErrorVariable err
+            azswap $Target -Interactive:$Interactive -DeviceCode:$DeviceCode -NoLogin:$NoLogin @accountArg -ErrorAction SilentlyContinue -ErrorVariable err
             if ($method -and $LASTEXITCODE -eq 0) { Write-AzswapSetting -Dir $dir -Name 'login' -Value $method }
             foreach ($e in $err) { if ($e.FullyQualifiedErrorId -like 'AzswapLogin*') { $PSCmdlet.WriteError($e) } }
             return
