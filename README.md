@@ -6,10 +6,12 @@ you running commands as the wrong account in the wrong tenant.
 
 ```text
 azswap                            Show the current profile and signed-in account
-azswap <profile> [-Interactive]   Switch profile; sign in if the token has expired
+azswap <profile> [-Interactive] [-NoLogin]
+                                  Switch profile; sign in if the token has expired
 azswap list                       List profiles with account, subscription and tenant
 azswap new <profile> <tenant>     Create a profile and sign in
-azswap login [-Interactive]       Sign in to the current profile again
+azswap login [-Interactive] [-NoLogin]
+                                  Sign in to the current profile again
 azswap help                       Show help (also -h, --help)
 azswap import [-Apply]            Adopt existing ~/.azure-* folders as profiles
 azswap import -FromDefault [-Apply]
@@ -123,6 +125,28 @@ Device code is the default because it works in any terminal, including remote an
 embedded ones. Tenants with Conditional Access policies that require a compliant or
 hybrid-joined device reject device-code sign-in, so use `-Interactive` for those. On
 Windows that goes through the Web Account Manager (WAM) broker.
+
+## Scripts, CI and agents
+
+`azswap` never starts a sign-in from a non-interactive host, where it would hang on a
+device code or fail for want of a browser window. A host counts as non-interactive when
+it has no terminal attached (redirected input: pipelines, scheduled jobs, most agent tool
+calls), when `CI`, `GITHUB_ACTIONS` or `TF_BUILD` is set to `true`, when it was started
+with `-NonInteractive`, or when the process isn't user-interactive at all. A script you
+run from your own terminal still counts as interactive, because you're there to sign in.
+
+Agents that run commands in a real terminal (a pty) look interactive, so they aren't
+detected. They must pass `-NoLogin`, which gives the same behaviour anywhere.
+
+In that mode `azswap <profile>` still switches. If the token has expired, it fails with
+an error naming the command to run in your own terminal, such as `azswap contoso`, and
+doesn't print the account. `azswap login` fails the same way, suggesting
+`azswap contoso; azswap login`, and `azswap new` creates the profile without signing in.
+
+The failure is a normal PowerShell error: `$?` is false, `$LASTEXITCODE` is 1, and
+`pwsh -Command` exits with 1. A sign-in that `az login` itself rejects fails the same way. A `pwsh -File` script exits non-zero only if it stops on
+errors (`$ErrorActionPreference = 'Stop'`, or `-ErrorAction Stop` on the call), as with
+any other PowerShell error.
 
 ## Things that ignore `azswap`
 

@@ -32,6 +32,8 @@ Describe 'azswap' {
         $env:AZSWAP_HOME = $TestDrive
         $env:AZURE_CONFIG_DIR = $null
 
+        # Pester itself runs non-interactive (redirected stdin in CI); these tests are about an interactive shell.
+        Mock Test-AzswapInteractive -ModuleName azswap { $true }
         Mock az -ModuleName azswap { 'user@contoso.com  Contoso Prod' } -ParameterFilter { $args[0] -eq 'account' -and $args[1] -eq 'show' }
         Mock az -ModuleName azswap { $global:LASTEXITCODE = 0 } -ParameterFilter { $args[0] -eq 'account' -and $args[1] -eq 'get-access-token' }
         Mock az -ModuleName azswap { $global:LASTEXITCODE = 0 } -ParameterFilter { $args[0] -eq 'login' }

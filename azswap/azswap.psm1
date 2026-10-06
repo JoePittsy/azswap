@@ -7,10 +7,12 @@ azswap - per-customer Azure CLI profiles
 
 Usage:
   azswap                            Show the current profile and signed-in account
-  azswap <profile> [-Interactive]   Switch profile; sign in if the token has expired
+  azswap <profile> [-Interactive] [-NoLogin]
+                                    Switch profile; sign in if the token has expired
   azswap list                       List profiles with account, subscription and tenant
   azswap new <profile> <tenant>     Create a profile and sign in
-  azswap login [-Interactive]       Sign in to the current profile again
+  azswap login [-Interactive] [-NoLogin]
+                                    Sign in to the current profile again
   azswap help                       Show this help (also -h, --help)
   azswap import [-Apply]            Adopt existing ~/.azure-* folders as profiles
   azswap import -FromDefault [-Apply]
@@ -19,6 +21,11 @@ Usage:
 Options:
   -Interactive   Browser (WAM) sign-in instead of device code. Needed where
                  Conditional Access blocks device code.
+  -NoLogin       Never sign in. Where a sign-in is needed, fail with the command
+                 to run instead. Always on in hosts with no terminal attached
+                 (redirected input), in CI (CI, GITHUB_ACTIONS or TF_BUILD set to
+                 true) and under -NonInteractive. Agents whose commands run in a
+                 terminal (a pty) aren't detected and must pass -NoLogin.
   -Apply         For import: write the changes. Without it, import is a dry run.
   -Only <names>  For import: only these profile names.
 
@@ -160,12 +167,97 @@ function Show-AzswapAccount {
     az account show --query "join('  ', [user.name, name])" -o tsv
 }
 
-# The only place azswap signs in.
+# Profile names: start with a letter or digit, no trailing '.' (Windows strips it), and nothing
+# a shell would need quoting for.
+$script:ProfileNamePattern = '^[A-Za-z0-9]([A-Za-z0-9._-]*[A-Za-z0-9_-])?$'
+
+# Runs az with its stderr discarded, for checks whose failure azswap handles itself. A local
+# 'Continue' stops Windows PowerShell turning that stderr into error records (terminating
+# under 'Stop'). Stdout passes through and $LASTEXITCODE is az's.
+function Invoke-AzswapNative {
+    $ErrorActionPreference = 'Continue'
+    az @args 2>$null
+}
+
+# The profile name for a config folder, or nothing if it isn't an azswap-style folder.
+function Get-AzswapProfileName {
+    param([string]$Dir)
+    $leaf = Split-Path $Dir -Leaf
+    if ($leaf -like '.azure-?*') { $leaf.Substring(7) }
+}
+
+# True if the PowerShell host's own arguments (the command line minus the executable)
+# include -NonInteractive. Only options before the script or command count: everything
+# after -File/-Command/-EncodedCommand/-CommandWithArgs, or after a bare script path,
+# belongs to the script.
+function Test-AzswapNonInteractiveArg {
+    param([string[]]$Arguments)
+    $valued = 'executionpolicy', 'ep', 'workingdirectory', 'wd', 'outputformat', 'o', 'of', 'inputformat', 'if',
+        'config', 'configurationname', 'configurationfile', 'settingsfile', 'windowstyle', 'w', 'version', 'v', 'psconsolefile', 'custompipename'
+    for ($i = 0; $i -lt $Arguments.Count; $i++) {
+        if ($Arguments[$i] -notmatch '^(--|-|/)([a-z]+)$') { return $false }
+        $name = $Matches[2]
+        if ($name -like 'noni*') { return $true }
+        # pwsh matches host options by prefix: -c/-co/-command, -f/-file, -e/-enc, plus -ec and -cwa
+        if ($name -in 'ec', 'cwa' -or @('command', 'file', 'encodedcommand', 'commandwithargs') -like "$name*") { return $false }
+        # ponytail: list of value-taking host options; one missing here only means a later -noni goes unseen
+        if ($name -in $valued -or ($name.Length -ge 2 -and @($valued -like "$name*").Count -eq 1)) { $i++ }
+    }
+    $false
+}
+
+# Interactive unless: the process isn't user-interactive (services), stdin is redirected (no
+# terminal attached: pipes, agent tool calls, most CI), CI/GITHUB_ACTIONS/TF_BUILD is 'true',
+# or the host was started with -NonInteractive. A script run from a terminal counts as
+# interactive, because a person is there to sign in.
+# The parameters exist only so tests can vary one signal at a time.
+function Test-AzswapInteractive {
+    param(
+        [bool]$UserInteractive = [Environment]::UserInteractive,
+        [bool]$InputRedirected = [Console]::IsInputRedirected,
+        [string[]]$HostArgs = @([Environment]::GetCommandLineArgs() | Select-Object -Skip 1)
+    )
+    $UserInteractive -and -not $InputRedirected -and
+        -not ('CI', 'GITHUB_ACTIONS', 'TF_BUILD' | Where-Object { [Environment]::GetEnvironmentVariable($_) -eq 'true' }) -and
+        -not (Test-AzswapNonInteractiveArg $HostArgs)
+}
+
+# The only place azswap signs in. Call it as a plain statement, never inside an expression:
+# az's stdout must stay the terminal, or az drops its subscription picker. Success is
+# $LASTEXITCODE -eq 0 afterwards. In a non-interactive host, or with -NoLogin, it never runs
+# az login: it sets $LASTEXITCODE to 1 and writes an AzswapLoginRefused error naming the command
+# for a human to run. A failed az login writes AzswapLoginFailed. Pass the calling azswap's
+# $PSCmdlet as -Cmdlet: errors then go through it, so the azswap call itself fails ($? is false,
+# pwsh -Command exits 1). -Again means the user asked to sign in again (azswap login), so the
+# suggested command does too.
 function Invoke-AzswapLogin {
-    param([string]$Dir, [switch]$Interactive)
+    [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidGlobalVars', '', Justification = 'LASTEXITCODE is how callers and scripts read the result')]
+    param([string]$Dir, [switch]$Interactive, [switch]$NoLogin, [switch]$Again, [Management.Automation.PSCmdlet]$Cmdlet)
+    $name = Get-AzswapProfileName $Dir
+    if ($name -and $name -notmatch $script:ProfileNamePattern) { $name = "'$($name -replace "'", "''")'" }
+    $fail = {
+        param($Message, $Id)
+        $rec = [Management.Automation.ErrorRecord]::new([Exception]::new($Message), $Id, 'AuthenticationError', $Dir)
+        if ($Cmdlet) { $Cmdlet.WriteError($rec) } else { Write-Error -ErrorRecord $rec }
+    }
+    if ($NoLogin -or -not (Test-AzswapInteractive)) {
+        $global:LASTEXITCODE = 1
+        $why = if ($NoLogin) { '-NoLogin was given' } else { 'this host is non-interactive' }
+        $switches = $(if ($Interactive) { ' -Interactive' })
+        $msg = if (-not $name) { "Sign-in needed, but $why, and '$Dir' isn't an azswap profile." }
+               elseif ($Again) { "Sign-in needed, but $why. Run this in your own terminal: azswap $name; azswap login$switches" }
+               else { "Sign-in needed, but $why. Run this in your own terminal: azswap $name$switches" }
+        & $fail $msg 'AzswapLoginRefused'
+        return
+    }
     $loginArgs = @('login', '--tenant', (Get-AzswapSetting -Dir $Dir -Name 'tenant'), '-o', 'none')
     if (-not $Interactive) { $loginArgs += '--use-device-code' }
     az @loginArgs
+    if ($LASTEXITCODE -ne 0) {
+        $code = $LASTEXITCODE
+        & $fail "Sign-in failed for '$(if ($name) { $name } else { $Dir })'." 'AzswapLoginFailed'
+        $global:LASTEXITCODE = $code
+    }
 }
 
 function azswap {
@@ -198,6 +290,18 @@ function azswap {
         Browser (WAM) sign-in instead of device code. Needed where Conditional Access
         blocks device code.
 
+    .PARAMETER NoLogin
+        Never sign in. Where a sign-in would start, write an error naming the command for
+        a human to run (azswap <profile>, plus -Interactive if given) and return without
+        printing the account. The call fails ($? is false, $LASTEXITCODE is 1, and
+        pwsh -Command exits 1).
+
+        This is automatic in a non-interactive host: one with no terminal attached
+        (redirected input), CI (CI, GITHUB_ACTIONS or TF_BUILD set to true), or started
+        with -NonInteractive. A script run from a terminal counts as interactive, since a
+        person is there to sign in. Agents whose commands run in a terminal (a pty) are
+        not detected, so they must pass -NoLogin.
+
     .PARAMETER Help
         Show the usage summary (same as 'azswap help', -h or --help).
 
@@ -218,6 +322,12 @@ function azswap {
 
         Switches this shell to the contoso profile, signing in with a device code if the
         token has expired.
+
+    .EXAMPLE
+        azswap contoso -NoLogin
+
+        Switches to the contoso profile but never signs in; if the token has expired it
+        fails with the command to run in an interactive terminal.
 
     .EXAMPLE
         azswap new fabrikam fabrikam.onmicrosoft.com -Interactive
@@ -253,11 +363,13 @@ function azswap {
     #>
     # Deliberately not Verb-Noun: it is a CLI typed constantly. ScriptAnalyzer only checks
     # dashed names, so this needs no suppression.
+    [CmdletBinding()]
     param(
         [Parameter(Position = 0)] [string]$Command,
         [Parameter(Position = 1)] [string]$Target,
         [Parameter(Position = 2)] [string]$Tenant,
         [switch]$Interactive,
+        [switch]$NoLogin,
         [Alias('h')] [switch]$Help,
         [switch]$Apply,
         [switch]$FromDefault,
@@ -269,7 +381,8 @@ function azswap {
     switch ($Command) {
         '' {
             if (-not $env:AZURE_CONFIG_DIR) { return "No profile selected; az is using ~/.azure. Run 'azswap list'." }
-            return "$((Split-Path $env:AZURE_CONFIG_DIR -Leaf).Substring(7))  $(Show-AzswapAccount)"
+            $name = Get-AzswapProfileName $env:AZURE_CONFIG_DIR
+            return "$(if ($name) { $name } else { $env:AZURE_CONFIG_DIR })  $(Show-AzswapAccount)"
         }
         'list' {
             return Get-AzswapProfile | ForEach-Object {
@@ -287,12 +400,19 @@ function azswap {
         }
         'new' {
             if (-not $Target -or -not $Tenant) { return Write-Error 'Usage: azswap new <profile> <tenant>' }
+            if ($Target -notmatch $script:ProfileNamePattern) {
+                return Write-Error "Profile names can only use letters, digits, '.', '_' and '-', must start with a letter or digit, and can't end with '.'."
+            }
             if ($Target -in $script:Commands) { return Write-Error "'$Target' is a command name; pick another profile name." }
             $dir = Join-Path (Get-AzswapRoot) ".azure-$Target"
             if (Test-Path (Join-Path $dir 'azswap-tenant')) { return Write-Error "Profile '$Target' already exists." }
             New-Item -ItemType Directory -Force $dir | Out-Null
             Write-AzswapSetting -Dir $dir -Name 'tenant' -Value $Tenant
-            return azswap $Target -Interactive:$Interactive
+            # Re-emit the inner call's sign-in errors through this call, so 'azswap new' itself fails
+            # too. Only those: Windows PowerShell also records az's discarded stderr as errors.
+            azswap $Target -Interactive:$Interactive -NoLogin:$NoLogin -ErrorAction SilentlyContinue -ErrorVariable err
+            foreach ($e in $err) { if ($e.FullyQualifiedErrorId -like 'AzswapLogin*') { $PSCmdlet.WriteError($e) } }
+            return
         }
         'import' {
             # Never signs in or touches tokens: it only writes azswap-* files.
@@ -322,7 +442,11 @@ function azswap {
         }
         'login' {
             if (-not $env:AZURE_CONFIG_DIR) { return Write-Error "No profile selected. Run 'azswap <profile>'." }
-            Invoke-AzswapLogin -Dir $env:AZURE_CONFIG_DIR -Interactive:$Interactive
+            if (-not (Test-Path (Join-Path $env:AZURE_CONFIG_DIR 'azswap-tenant'))) {
+                return Write-Error "'$env:AZURE_CONFIG_DIR' isn't an azswap profile. Run 'azswap <profile>'."
+            }
+            Invoke-AzswapLogin -Dir $env:AZURE_CONFIG_DIR -Interactive:$Interactive -NoLogin:$NoLogin -Again -Cmdlet $PSCmdlet
+            if ($LASTEXITCODE -ne 0) { return }
             return Show-AzswapAccount
         }
         default {
@@ -331,8 +455,11 @@ function azswap {
                 return Write-Error "Unknown profile '$Command'. Run 'azswap list', or 'azswap new $Command <tenant>'."
             }
             $env:AZURE_CONFIG_DIR = $dir
-            az account get-access-token -o none 2>$null
-            if ($LASTEXITCODE -ne 0) { Invoke-AzswapLogin -Dir $dir -Interactive:$Interactive }
+            Invoke-AzswapNative account get-access-token -o none
+            if ($LASTEXITCODE -ne 0) {
+                Invoke-AzswapLogin -Dir $dir -Interactive:$Interactive -NoLogin:$NoLogin -Cmdlet $PSCmdlet
+                if ($LASTEXITCODE -ne 0) { return }
+            }
             return Show-AzswapAccount
         }
     }
