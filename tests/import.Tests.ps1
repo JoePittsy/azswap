@@ -153,6 +153,52 @@ Describe 'azswap import' {
                 Should -Be @('.azure-contosoltd', '.azure-fabrikam-me')
         }
 
+        Context 'identities that already have profiles' {
+            BeforeEach {
+                Get-ChildItem $TestDrive -Force | Remove-Item -Recurse -Force
+                New-AzFolder '.azure' @(
+                    @('azx.me@leeds.gov.uk', 'T1', $true),
+                    @('JPitts@trueNorthIT.co.uk', 'T1', $false),
+                    @('adm@truenorthit.co.uk', 'T3', $false),
+                    @('me@nhs.net', 'T2', $false)
+                ) | Out-Null
+                function New-Profile($Name, $Tenant) {
+                    $dir = Join-Path $TestDrive ".azure-$Name"
+                    New-Item -ItemType Directory -Force $dir | Out-Null
+                    Set-Content (Join-Path $dir 'azswap-tenant') $Tenant
+                    $dir
+                }
+                # Covered through its azureProfile.json, which has no azswap-account.
+                $lcc = New-AzFolder '.azure-lcc' @(, @('AZX.me@leeds.gov.uk', 'T1', $true))
+                Set-Content (Join-Path $lcc 'azswap-tenant') 'T1'
+                # Never signed in: same tenant, account unknown.
+                New-Profile lcc-tnit T1 | Out-Null
+                New-Profile nhs T2 | Out-Null
+                New-Profile nhs2 T2 | Out-Null
+                # Covered through azswap-account (case-insensitive), never signed in.
+                Set-Content (Join-Path (New-Profile tnit T3) 'azswap-account') 'ADM@TrueNorthIT.co.uk'
+            }
+
+            It 'shows covered identities as existing and skips unconfirmed ones' {
+                $rows = azswap import -FromDefault -Apply
+                (Get-Row $rows leeds).Status | Should -Be 'exists: lcc'
+                (Get-Row $rows truenorthit-adm).Status | Should -Be 'exists: tnit'
+                (Get-Row $rows truenorthit-jpitts).Status |
+                    Should -Be "skipped: tenant already has profile 'lcc-tnit' (account unknown; sign in to it, or use -Only to create anyway)"
+                (Get-Row $rows nhs).Status | Should -Match "^skipped: tenant already has profile 'nhs', 'nhs2' \(account unknown"
+                (Get-ChildItem $TestDrive -Force -Filter '.azure-*').Name | Sort-Object |
+                    Should -Be @('.azure-lcc', '.azure-lcc-tnit', '.azure-nhs', '.azure-nhs2', '.azure-tnit')
+            }
+
+            It 'creates an unconfirmed identity named in -Only, but never a covered one' {
+                $rows = azswap import -FromDefault -Only truenorthit-jpitts, leeds -Apply
+                (Get-Row $rows truenorthit-jpitts).Status | Should -Match '^created'
+                Get-Content (Join-Path $TestDrive '.azure-truenorthit-jpitts\azswap-account') | Should -Be 'JPitts@trueNorthIT.co.uk'
+                (Get-Row $rows leeds).Status | Should -Be 'exists: lcc'
+                Test-Path (Join-Path $TestDrive '.azure-leeds') | Should -BeFalse
+            }
+        }
+
         It 'errors when ~/.azure has no accounts' {
             Remove-Item (Join-Path $TestDrive '.azure\azureProfile.json')
             { azswap import -FromDefault -ErrorAction Stop } | Should -Throw 'No accounts found*'

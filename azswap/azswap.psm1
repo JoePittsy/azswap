@@ -77,7 +77,7 @@ function Get-AzswapDefaultIdentity {
             # the start of the tenant id (a service principal's name is a GUID).
             $domain = if ($s.tenantDefaultDomain) { $s.tenantDefaultDomain } elseif ($s.user.name -match '@(.+)$') { $Matches[1] }
             $name = if ($domain) { $domain.Split('.')[0] } else { "$($s.tenantId)".Split('-')[0] }
-            [pscustomobject]@{ Profile = ConvertTo-AzswapName $name; Account = $s.user.name; Tenant = $s.tenantId; Reason = $null }
+            [pscustomobject]@{ Profile = ConvertTo-AzswapName $name; Account = $s.user.name; Tenant = $s.tenantId; Reason = $null; Exists = $null }
         }
     # Two identities with the same name (two accounts in one tenant): add each account's
     # local part, or the start of a service principal's app id.
@@ -86,6 +86,28 @@ function Get-AzswapDefaultIdentity {
         $_.Profile = ConvertTo-AzswapName "$($_.Profile)-$local"
     }
     $ids
+}
+
+# Marks -FromDefault identities that existing profiles already cover. Covered: a profile
+# with the same tenant and account (its azswap-account, else its default subscription's
+# user). A profile in the same tenant with no known account (never signed in) might be the
+# same identity, so that one is skipped unless -Only names it.
+function Resolve-AzswapCoverage {
+    param([object[]]$Identity, [string[]]$Only)
+    $known = @(Get-AzswapProfile | ForEach-Object {
+        $account = Get-AzswapSetting -Dir $_.FullName -Name 'account'
+        if (-not $account) { $account = (Get-AzswapSubscription $_.FullName | Where-Object isDefault | Select-Object -First 1).user.name }
+        [pscustomobject]@{ Name = $_.Name.Substring(7); Tenant = Get-AzswapSetting -Dir $_.FullName -Name 'tenant'; Account = $account }
+    })
+    foreach ($id in $Identity) {
+        $same = @($known | Where-Object Tenant -eq $id.Tenant)
+        $match = $same | Where-Object { $_.Account -and $_.Account -eq $id.Account } | Select-Object -First 1
+        $unknown = @($same | Where-Object { -not $_.Account } | ForEach-Object { "'$($_.Name)'" })
+        if ($match) { $id.Exists = $match.Name }
+        elseif ($unknown -and $id.Profile -notin $Only) {
+            $id.Reason = "tenant already has profile $($unknown -join ', ') (account unknown; sign in to it, or use -Only to create anyway)"
+        }
+    }
 }
 
 # One candidate per <root>/.azure-* folder that is not a profile yet (plain import).
@@ -255,6 +277,7 @@ function azswap {
                 if ($FromDefault) { return Write-Error "No accounts found in $(Join-Path $root '.azure')." }
                 return 'No ~/.azure-* folders to import.'
             }
+            if ($FromDefault) { Resolve-AzswapCoverage $candidates -Only $Only }
             $seen = @{}
             return $candidates | Where-Object { -not $Only -or $_.Profile -in $Only } | ForEach-Object {
                 $dir = Join-Path $root ".azure-$($_.Profile)"
@@ -263,7 +286,8 @@ function azswap {
                                 elseif ($FromDefault -and ((Test-Path $dir) -or $seen[$_.Profile])) { ".azure-$($_.Profile) already exists" }
                 }
                 $seen[$_.Profile] = $true
-                $status = if ($_.Reason) { "skipped: $($_.Reason)" }
+                $status = if ($_.Exists) { "exists: $($_.Exists)" }
+                          elseif ($_.Reason) { "skipped: $($_.Reason)" }
                           elseif (-not $Apply) { if ($FromDefault) { 'would create' } else { 'would register' } }
                           else {
                               if ($FromDefault) { New-Item -ItemType Directory $dir | Out-Null }
