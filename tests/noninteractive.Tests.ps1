@@ -170,7 +170,9 @@ Describe 'interactive sign-in' {
 
     It 'Invoke-AzswapLogin emits nothing when it refuses' {
         $dir = New-TestProfile contoso 'tid-1'
-        & (Get-Module azswap) { param($d) Invoke-AzswapLogin -Dir $d -NoLogin 2>$null } $dir | Should -BeNullOrEmpty
+        # CI runs with $ErrorActionPreference = 'Stop'; this test is only about pipeline output.
+        & (Get-Module azswap) { param($d) $ErrorActionPreference = 'SilentlyContinue'; Invoke-AzswapLogin -Dir $d -NoLogin } $dir |
+            Should -BeNullOrEmpty
     }
 }
 
@@ -210,6 +212,8 @@ Describe 'process exit code' {
             "Import-Module '$psd1'"
             "function global:az { if (`$args[0] -eq 'login') { throw 'az login was called' }; `$global:LASTEXITCODE = 1 }"
         ) -join "`n"
+        # Windows PowerShell turns the child's stderr into errors, which 'Stop' (as in CI) would throw.
+        $ErrorActionPreference = 'Continue'
     }
 
     It 'exits non-zero from pwsh -Command' {
