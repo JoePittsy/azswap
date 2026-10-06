@@ -7,10 +7,10 @@ azswap - per-customer Azure CLI profiles
 
 Usage:
   azswap                            Show the current profile and signed-in account
-  azswap <profile> [-Interactive|-DeviceCode] [-NoLogin]
+  azswap <profile> [-Interactive|-DeviceCode] [-NoLogin] [-Account <upn>]
                                     Switch profile; sign in if the token has expired
   azswap list                       List profiles with account, subscription and tenant
-  azswap new <profile> <tenant> [-Interactive|-DeviceCode]
+  azswap new <profile> <tenant> [-Interactive|-DeviceCode] [-Account <upn>]
                                     Create a profile and sign in
   azswap login [-Interactive|-DeviceCode] [-NoLogin]
                                     Sign in to the current profile again
@@ -28,6 +28,9 @@ Options:
                  (redirected input), in CI (CI, GITHUB_ACTIONS or TF_BUILD set to
                  true) and under -NonInteractive. Agents whose commands run in a
                  terminal (a pty) aren't detected and must pass -NoLogin.
+  -Account <upn> With new, login or <profile>: the account this profile must be
+                 signed in as (in azswap-account). azswap warns loudly when the
+                 signed-in account differs.
   -Apply         For import: write the changes. Without it, import is a dry run.
   -Only <names>  For import: only these profile names.
 
@@ -278,6 +281,33 @@ function Invoke-AzswapLogin {
     }
 }
 
+# Compares the signed-in account (of the active AZURE_CONFIG_DIR, which callers have set to
+# $Dir) with azswap-account. Warns and returns $false on a mismatch; otherwise $true.
+# With no expected account: -SignedIn (azswap has just signed in successfully) records the
+# account; otherwise it only warns, because an old sign-in may already be the wrong one.
+function Test-AzswapAccount {
+    [CmdletBinding()]
+    param([string]$Dir, [switch]$SignedIn)
+    $actual = Invoke-AzswapNative account show --query user.name -o tsv
+    if (-not $actual) { return $true } # not signed in: nothing to compare
+    $name = Get-AzswapProfileName $Dir
+    $expected = Get-AzswapSetting -Dir $Dir -Name 'account'
+    if (-not $expected) {
+        if ($SignedIn) {
+            Write-AzswapSetting -Dir $Dir -Name 'account' -Value $actual
+            Write-Information "Recorded $actual as the expected account for '$name'." -InformationAction Continue
+        } else {
+            Write-Warning "No expected account for '$name' (signed in as $actual). If that's right, run: azswap $name -Account $actual"
+        }
+        return $true
+    }
+    if ($actual -eq $expected) { return $true } # -eq is case-insensitive
+    Write-Warning ("WRONG ACCOUNT: profile '$name' is signed in as $actual, but expects $expected. " +
+        "If $expected is right, sign in again and pick it: 'azswap login' (or 'azswap login -Interactive'). " +
+        "If $actual is right, update the expected account: 'azswap $name -Account $actual'.")
+    $false
+}
+
 function azswap {
     <#
     .SYNOPSIS
@@ -288,6 +318,10 @@ function azswap {
         profile's tenant id stored in an azswap-tenant file inside it. Switching sets
         $env:AZURE_CONFIG_DIR for the current session, checks the token, signs in to the
         profile's tenant if it has expired, and prints the signed-in account.
+
+        Each profile also records the account it must be signed in as (azswap-account).
+        After switching or signing in, azswap warns loudly when the signed-in account is
+        different, and 'azswap list' marks the mismatch with '!'.
 
         Commands: (none) shows the current profile; <profile> switches; list, new, login,
         import and help. Run 'azswap help' for a one-screen summary.
@@ -303,6 +337,12 @@ function azswap {
 
     .PARAMETER Tenant
         For 'new': the tenant id or domain the profile signs in to.
+
+    .PARAMETER Account
+        For 'new', 'login' or <profile>: the account (user.name) the profile must be signed
+        in as, stored in azswap-account. Without it, the account of the profile's next
+        successful azswap sign-in is recorded. A profile with no expected account warns on
+        every switch until you set one.
 
     .PARAMETER Interactive
         Browser (WAM) sign-in instead of device code. Needed where Conditional Access
@@ -366,6 +406,11 @@ function azswap {
         sign-in method from now on.
 
     .EXAMPLE
+        azswap contoso -Account admin@contoso.com
+
+        Sets the account the contoso profile should be signed in as, then switches to it.
+
+    .EXAMPLE
         azswap list
 
         Lists every profile with its account, default subscription and tenant. The
@@ -399,6 +444,7 @@ function azswap {
         [Parameter(Position = 0)] [string]$Command,
         [Parameter(Position = 1)] [string]$Target,
         [Parameter(Position = 2)] [string]$Tenant,
+        [string]$Account,
         [switch]$Interactive,
         [switch]$NoLogin,
         [switch]$DeviceCode,
@@ -412,6 +458,7 @@ function azswap {
     if ($Interactive -and $DeviceCode) { return Write-Error 'Use -Interactive or -DeviceCode, not both.' }
     # 'new' and 'login' remember an explicit method once a sign-in with it succeeds.
     $method = if ($Interactive) { 'interactive' } elseif ($DeviceCode) { 'devicecode' }
+    if ($Account -and $Command -in '', 'list', 'import') { return Write-Error '-Account works with new, login or a profile name.' }
 
     switch ($Command) {
         '' {
@@ -424,10 +471,13 @@ function azswap {
                 $p = Get-Content (Join-Path $_.FullName 'azureProfile.json') -Raw -ErrorAction SilentlyContinue |
                     ConvertFrom-Json -ErrorAction SilentlyContinue
                 $sub = $p.subscriptions | Where-Object isDefault | Select-Object -First 1
+                $expected = Get-AzswapSetting -Dir $_.FullName -Name 'account'
                 [pscustomobject]@{
                     ' '          = if ($_.FullName -eq $env:AZURE_CONFIG_DIR) { '*' } else { '' }
                     Profile      = $_.Name.Substring(7)
-                    Account      = $sub.user.name
+                    Account      = if ($sub.user.name -and $expected -and $sub.user.name -ne $expected) {
+                        "! $($sub.user.name) (expects $expected)"
+                    } else { $sub.user.name }
                     Subscription = $sub.name
                     Tenant       = Get-AzswapSetting -Dir $_.FullName -Name 'tenant'
                 }
@@ -446,7 +496,7 @@ function azswap {
             # Re-emit the inner call's sign-in errors through this call, so 'azswap new' itself fails
             # too. Only those: Windows PowerShell also records az's discarded stderr as errors.
             # Not captured: az login must keep the terminal. A new folder has no token, so this signs in.
-            azswap $Target -Interactive:$Interactive -DeviceCode:$DeviceCode -NoLogin:$NoLogin -ErrorAction SilentlyContinue -ErrorVariable err
+            azswap $Target -Interactive:$Interactive -DeviceCode:$DeviceCode -NoLogin:$NoLogin -Account $Account -ErrorAction SilentlyContinue -ErrorVariable err
             if ($method -and $LASTEXITCODE -eq 0) { Write-AzswapSetting -Dir $dir -Name 'login' -Value $method }
             foreach ($e in $err) { if ($e.FullyQualifiedErrorId -like 'AzswapLogin*') { $PSCmdlet.WriteError($e) } }
             return
@@ -482,23 +532,31 @@ function azswap {
             if (-not (Test-Path (Join-Path $env:AZURE_CONFIG_DIR 'azswap-tenant'))) {
                 return Write-Error "'$env:AZURE_CONFIG_DIR' isn't an azswap profile. Run 'azswap <profile>'."
             }
+            if ($Account) { Write-AzswapSetting -Dir $env:AZURE_CONFIG_DIR -Name 'account' -Value $Account }
             Invoke-AzswapLogin -Dir $env:AZURE_CONFIG_DIR -Interactive:$Interactive -DeviceCode:$DeviceCode -NoLogin:$NoLogin -Again -Cmdlet $PSCmdlet
             if ($LASTEXITCODE -ne 0) { return }
             if ($method) { Write-AzswapSetting -Dir $env:AZURE_CONFIG_DIR -Name 'login' -Value $method }
-            return Show-AzswapAccount
+            Show-AzswapAccount
+            $null = Test-AzswapAccount -Dir $env:AZURE_CONFIG_DIR -SignedIn
+            return
         }
         default {
             $dir = Join-Path (Get-AzswapRoot) ".azure-$Command"
             if (-not (Test-Path (Join-Path $dir 'azswap-tenant'))) {
                 return Write-Error "Unknown profile '$Command'. Run 'azswap list', or 'azswap new $Command <tenant>'."
             }
+            if ($Account) { Write-AzswapSetting -Dir $dir -Name 'account' -Value $Account }
             $env:AZURE_CONFIG_DIR = $dir
             Invoke-AzswapNative account get-access-token -o none
+            $signedIn = $false
             if ($LASTEXITCODE -ne 0) {
                 Invoke-AzswapLogin -Dir $dir -Interactive:$Interactive -DeviceCode:$DeviceCode -NoLogin:$NoLogin -Cmdlet $PSCmdlet
                 if ($LASTEXITCODE -ne 0) { return }
+                $signedIn = $true # only now may Test-AzswapAccount record the account
             }
-            return Show-AzswapAccount
+            Show-AzswapAccount
+            $null = Test-AzswapAccount -Dir $dir -SignedIn:$signedIn
+            return
         }
     }
 }

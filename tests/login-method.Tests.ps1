@@ -48,7 +48,7 @@ Describe 'sign-in method' {
 
         # Pester's host is non-interactive, which would refuse every sign-in.
         Mock Test-AzswapInteractive -ModuleName azswap { $true }
-        Mock az -ModuleName azswap { 'user@contoso.com  Contoso Prod' } -ParameterFilter { $args[0] -eq 'account' -and $args[1] -eq 'show' }
+        Mock az -ModuleName azswap { if ($args -notcontains 'user.name') { 'user@contoso.com  Contoso Prod' } } -ParameterFilter { $args[0] -eq 'account' -and $args[1] -eq 'show' } # user.name query (account check): not signed in
         # Token always expired, so every switch signs in.
         Mock az -ModuleName azswap { $global:LASTEXITCODE = 1 } -ParameterFilter { $args[0] -eq 'account' -and $args[1] -eq 'get-access-token' }
         Mock az -ModuleName azswap { $global:LASTEXITCODE = 0 } -ParameterFilter { $args[0] -eq 'login' }
