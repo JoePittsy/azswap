@@ -27,8 +27,34 @@ function Get-AzswapRoot {
 }
 
 function Get-AzswapProfile {
-    Get-ChildItem (Get-AzswapRoot) -Directory -Filter '.azure-*' |
+    # -Force: on Linux/macOS dot-folders are hidden and skipped without it
+    Get-ChildItem (Get-AzswapRoot) -Directory -Force -Filter '.azure-*' |
         Where-Object { Test-Path (Join-Path $_.FullName 'azswap-tenant') }
+}
+
+# Per-profile settings are one-line files named azswap-<name> inside the profile folder
+# (azswap-tenant today). A missing file means "not set".
+function Get-AzswapSetting {
+    param([string]$Dir, [string]$Name)
+    $file = Join-Path $Dir "azswap-$Name"
+    if (Test-Path $file) { (Get-Content $file -Raw).Trim() }
+}
+
+function Write-AzswapSetting {
+    param([string]$Dir, [string]$Name, [string]$Value)
+    Set-Content (Join-Path $Dir "azswap-$Name") $Value
+}
+
+function Show-AzswapAccount {
+    az account show --query "join('  ', [user.name, name])" -o tsv
+}
+
+# The only place azswap signs in.
+function Invoke-AzswapLogin {
+    param([string]$Dir, [switch]$Interactive)
+    $loginArgs = @('login', '--tenant', (Get-AzswapSetting -Dir $Dir -Name 'tenant'), '-o', 'none')
+    if (-not $Interactive) { $loginArgs += '--use-device-code' }
+    az @loginArgs
 }
 
 function azswap {
@@ -99,20 +125,12 @@ function azswap {
         [Alias('h')] [switch]$Help
     )
 
-    $show = { az account show --query "join('  ', [user.name, name])" -o tsv }
-    $login = {
-        param($dir)
-        $loginArgs = @('login', '--tenant', (Get-Content (Join-Path $dir 'azswap-tenant')).Trim(), '-o', 'none')
-        if (-not $Interactive) { $loginArgs += '--use-device-code' }
-        az @loginArgs
-    }
-
     if ($Help -or $Command -in 'help', '--help') { return $script:Usage }
 
     switch ($Command) {
         '' {
             if (-not $env:AZURE_CONFIG_DIR) { return "No profile selected; az is using ~/.azure. Run 'azswap list'." }
-            return "$((Split-Path $env:AZURE_CONFIG_DIR -Leaf).Substring(7))  $(& $show)"
+            return "$((Split-Path $env:AZURE_CONFIG_DIR -Leaf).Substring(7))  $(Show-AzswapAccount)"
         }
         'list' {
             return Get-AzswapProfile | ForEach-Object {
@@ -124,7 +142,7 @@ function azswap {
                     Profile      = $_.Name.Substring(7)
                     Account      = $sub.user.name
                     Subscription = $sub.name
-                    Tenant       = (Get-Content (Join-Path $_.FullName 'azswap-tenant')).Trim()
+                    Tenant       = Get-AzswapSetting -Dir $_.FullName -Name 'tenant'
                 }
             } | Format-Table -AutoSize
         }
@@ -134,13 +152,13 @@ function azswap {
             $dir = Join-Path (Get-AzswapRoot) ".azure-$Target"
             if (Test-Path (Join-Path $dir 'azswap-tenant')) { return Write-Error "Profile '$Target' already exists." }
             New-Item -ItemType Directory -Force $dir | Out-Null
-            Set-Content (Join-Path $dir 'azswap-tenant') $Tenant
+            Write-AzswapSetting -Dir $dir -Name 'tenant' -Value $Tenant
             return azswap $Target -Interactive:$Interactive
         }
         'login' {
             if (-not $env:AZURE_CONFIG_DIR) { return Write-Error "No profile selected. Run 'azswap <profile>'." }
-            & $login $env:AZURE_CONFIG_DIR
-            return & $show
+            Invoke-AzswapLogin -Dir $env:AZURE_CONFIG_DIR -Interactive:$Interactive
+            return Show-AzswapAccount
         }
         default {
             $dir = Join-Path (Get-AzswapRoot) ".azure-$Command"
@@ -149,8 +167,8 @@ function azswap {
             }
             $env:AZURE_CONFIG_DIR = $dir
             az account get-access-token -o none 2>$null
-            if ($LASTEXITCODE -ne 0) { & $login $dir }
-            return & $show
+            if ($LASTEXITCODE -ne 0) { Invoke-AzswapLogin -Dir $dir -Interactive:$Interactive }
+            return Show-AzswapAccount
         }
     }
 }
