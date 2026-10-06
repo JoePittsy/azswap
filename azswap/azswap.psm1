@@ -583,7 +583,7 @@ function azswap {
             $previous = $env:AZURE_CONFIG_DIR
             try {
                 $env:AZURE_CONFIG_DIR = $dir
-                az account get-access-token -o none 2>$null
+                Invoke-AzswapNative account get-access-token -o none
                 $signedIn = $false
                 if ($LASTEXITCODE -ne 0) {
                     Invoke-AzswapLogin -Dir $dir -Interactive:$Interactive -DeviceCode:$DeviceCode -NoLogin:$NoLogin -Cmdlet $PSCmdlet

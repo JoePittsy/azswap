@@ -109,7 +109,8 @@ Describe 'azswap run' {
 
         It 'does not run the command when sign-in fails, and LASTEXITCODE stays non-zero' {
             Mock az -ModuleName azswap { $global:LASTEXITCODE = 1 } -ParameterFilter { $args[0] -eq 'login' }
-            azswap run contoso -WarningAction SilentlyContinue -- Invoke-Boom
+            Get-RunError { azswap run contoso -ErrorAction Stop -WarningAction SilentlyContinue -- Invoke-Boom } |
+                Should -Be "Sign-in failed for 'contoso'."
             Should -Invoke Invoke-Boom -Times 0 -Exactly
             $LASTEXITCODE | Should -Not -Be 0
             $env:AZURE_CONFIG_DIR | Should -Be $other
