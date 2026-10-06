@@ -11,6 +11,9 @@ azswap list                       List profiles with account, subscription and t
 azswap new <profile> <tenant>     Create a profile and sign in
 azswap login [-Interactive]       Sign in to the current profile again
 azswap help                       Show help (also -h, --help)
+azswap import [-Apply]            Adopt existing ~/.azure-* folders as profiles
+azswap import -FromDefault [-Apply]
+                                  Split ~/.azure into a profile per account
 ```
 
 ## How it works
@@ -67,13 +70,52 @@ azswap new fabrikam fabrikam.onmicrosoft.com -Interactive
 
 The tenant can be a tenant id or a domain. Tab completion covers commands and profile names.
 
-### Already have `~/.azure-<name>` folders?
+## Moving to azswap
 
-Write the tenant into each one and `azswap` picks it up:
+Already have identities set up? `azswap import` turns them into profiles. It is a dry
+run until you add `-Apply`, it never signs in, and it never touches tokens.
+
+### Existing `~/.azure-<name>` folders
 
 ```powershell
-Set-Content "$HOME\.azure-contoso\azswap-tenant" '00000000-0000-0000-0000-000000000000'
+azswap import          # show what it would register
+azswap import -Apply   # write it
 ```
+
+Each `~/.azure-*` folder without an `azswap-tenant` file becomes the profile `<name>`,
+with the tenant and account of its default subscription. Folders it can't work out are
+listed with the reason: never signed in, several tenants and no default subscription, or
+not an az config folder at all (such as `~/.azure-devops`). Sign in to a never-used folder
+with `az login` first, or create it again with `azswap new`.
+
+### Everything in `~/.azure`
+
+If every customer lives in the default `~/.azure`, split it up:
+
+```powershell
+azswap import -FromDefault                                  # suggested profiles
+azswap import -FromDefault -Only contoso, fabrikam -Apply   # create the ones you want
+azswap contoso                                              # then sign in to each
+```
+
+There is one suggestion per account and tenant. The name comes from the tenant's domain
+if az recorded it, otherwise from the account's domain; two accounts in one tenant get
+the account name added (`fabrikam-me`, `fabrikam-admin`). `-Apply` creates an empty
+profile folder with the tenant and account recorded, and prints the `azswap <profile>`
+command to sign in with. Tokens are deliberately not copied, so `~/.azure` is left as it
+is. Names that clash with an existing folder or a command are skipped.
+
+Part-way through moving? Identities you already have a profile for (same tenant and
+account) show as `exists: <profile>` and are never created again. If a profile for the
+same tenant has never been signed in, `azswap` can't tell whether it's the same account,
+so it skips that identity and says why; sign in to the profile, or name the identity in
+`-Only` to create it anyway.
+
+Don't like a name? Rename the folder before you sign in
+(`Rename-Item ~/.azure-contosoltd .azure-contoso`), or use `azswap new` instead.
+
+Both modes return objects, so `-Only` takes the names from the dry run, and you can
+filter or export the results like any other PowerShell output.
 
 ## Device code or browser sign-in?
 
