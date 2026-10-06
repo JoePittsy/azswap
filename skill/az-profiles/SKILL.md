@@ -71,8 +71,10 @@ AZURE_CONFIG_DIR=~/.azure-<name> az account show --query "{user:user.name,sub:na
 ## Signing in (the user runs this, never a tool call)
 
 Sign-in is interactive, and from a tool call it either hangs waiting for a device code
-or fails because the broker has no window. Give the user one line to run in their own
-terminal:
+or fails because the broker has no window. azswap refuses to sign in from non-interactive
+hosts and prints the command for the user to run instead. If your commands run in a
+terminal (a pty), azswap can't tell, so pass `-NoLogin`. Give the user one line to run in
+their own terminal:
 
 ```powershell
 azswap <name>
