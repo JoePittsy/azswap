@@ -288,7 +288,8 @@ function Invoke-AzswapLogin {
 function Test-AzswapAccount {
     [CmdletBinding()]
     param([string]$Dir, [switch]$SignedIn)
-    $actual = Invoke-AzswapNative account show --query user.name -o tsv
+    $query = 'account', 'show', '--query', 'user.name', '-o', 'tsv'
+    $actual = Invoke-AzswapNative @query
     if (-not $actual) { return $true } # not signed in: nothing to compare
     $name = Get-AzswapProfileName $Dir
     $expected = Get-AzswapSetting -Dir $Dir -Name 'account'

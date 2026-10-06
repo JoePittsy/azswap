@@ -135,7 +135,7 @@ Describe 'account check' {
             New-TestProfile contoso 'tid-1' | Out-Null
             Mock az -ModuleName azswap { $global:LASTEXITCODE = 1 } -ParameterFilter { $args[0] -eq 'account' -and $args[1] -eq 'get-access-token' }
             Mock az -ModuleName azswap { $global:LASTEXITCODE = 1 } -ParameterFilter { $args[0] -eq 'login' }
-            azswap contoso -WarningAction SilentlyContinue | Should -BeNullOrEmpty
+            azswap contoso -WarningAction SilentlyContinue -ErrorAction SilentlyContinue | Should -BeNullOrEmpty
             Get-Expected contoso | Should -BeNullOrEmpty
             Should -Invoke az -ModuleName azswap -Times 0 -Exactly -ParameterFilter { $args[0] -eq 'account' -and $args[1] -eq 'show' }
         }
@@ -202,5 +202,47 @@ Describe 'account check' {
             $lines | Where-Object { $_ -match 'fabrikam' } | Should -Not -Match '!'
             Should -Invoke az -ModuleName azswap -Times 0 -Exactly
         }
+    }
+}
+
+# Windows PowerShell 5.1 turns redirected native stderr into error records, which throw under
+# $ErrorActionPreference = 'Stop'; az writes update notices there. A Pester mock runs in the
+# test's scope, so this needs a real native az: an az.cmd on PATH, with no mocks or stub.
+Describe 'account check with az writing to stderr under Stop' -Skip:($env:OS -ne 'Windows_NT') {
+    BeforeAll {
+        while (Test-Path function:az) { Remove-Item function:az }
+        $bin = New-Item -ItemType Directory (Join-Path $TestDrive 'bin')
+        Set-Content (Join-Path $bin 'az.cmd') @'
+@echo off
+echo update notice 1>&2
+if "%2"=="get-access-token" exit /b 0
+if "%~4"=="user.name" goto user
+echo me@contoso.com  Contoso Prod
+exit /b 0
+:user
+echo me@contoso.com
+'@
+        $savedPath, $savedHome, $savedConfig = $env:PATH, $env:AZSWAP_HOME, $env:AZURE_CONFIG_DIR
+        $env:PATH = "$bin;$env:PATH"
+        $env:AZSWAP_HOME = $TestDrive
+        $dir = Join-Path $TestDrive '.azure-contoso'
+        New-Item -ItemType Directory $dir | Out-Null
+        Set-Content (Join-Path $dir 'azswap-tenant') 'tid-1'
+        Set-Content (Join-Path $dir 'azswap-account') 'admin@contoso.com'
+    }
+
+    AfterAll {
+        $env:PATH, $env:AZSWAP_HOME, $env:AZURE_CONFIG_DIR = $savedPath, $savedHome, $savedConfig
+        function global:az { throw "Unmocked az call: $args" }
+    }
+
+    It 'still switches and checks the account' {
+        # Global, as in CI and a user's profile: module functions don't see a caller's local preference.
+        $savedPreference = $global:ErrorActionPreference
+        $global:ErrorActionPreference = 'Stop'
+        try { $out = azswap contoso -WarningVariable w -WarningAction SilentlyContinue }
+        finally { $global:ErrorActionPreference = $savedPreference }
+        $out | Should -Be 'me@contoso.com  Contoso Prod'
+        "$w" | Should -Match 'WRONG ACCOUNT: profile .contoso. is signed in as me@contoso\.com'
     }
 }
