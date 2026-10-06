@@ -105,6 +105,12 @@ profile folder with the tenant and account recorded, and prints the `azswap <pro
 command to sign in with. Tokens are deliberately not copied, so `~/.azure` is left as it
 is. Names that clash with an existing folder or a command are skipped.
 
+Part-way through moving? Identities you already have a profile for (same tenant and
+account) show as `exists: <profile>` and are never created again. If a profile for the
+same tenant has never been signed in, `azswap` can't tell whether it's the same account,
+so it skips that identity and says why; sign in to the profile, or name the identity in
+`-Only` to create it anyway.
+
 Don't like a name? Rename the folder before you sign in
 (`Rename-Item ~/.azure-contosoltd .azure-contoso`), or use `azswap new` instead.
 
