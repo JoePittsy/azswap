@@ -7,11 +7,12 @@ azswap - per-customer Azure CLI profiles
 
 Usage:
   azswap                            Show the current profile and signed-in account
-  azswap <profile> [-Interactive] [-NoLogin]
+  azswap <profile> [-Interactive|-DeviceCode] [-NoLogin]
                                     Switch profile; sign in if the token has expired
   azswap list                       List profiles with account, subscription and tenant
-  azswap new <profile> <tenant>     Create a profile and sign in
-  azswap login [-Interactive] [-NoLogin]
+  azswap new <profile> <tenant> [-Interactive|-DeviceCode]
+                                    Create a profile and sign in
+  azswap login [-Interactive|-DeviceCode] [-NoLogin]
                                     Sign in to the current profile again
   azswap help                       Show this help (also -h, --help)
   azswap import [-Apply]            Adopt existing ~/.azure-* folders as profiles
@@ -21,6 +22,7 @@ Usage:
 Options:
   -Interactive   Browser (WAM) sign-in instead of device code. Needed where
                  Conditional Access blocks device code.
+  -DeviceCode    Device code sign-in, overriding a remembered -Interactive.
   -NoLogin       Never sign in. Where a sign-in is needed, fail with the command
                  to run instead. Always on in hosts with no terminal attached
                  (redirected input), in CI (CI, GITHUB_ACTIONS or TF_BUILD set to
@@ -28,6 +30,10 @@ Options:
                  terminal (a pty) aren't detected and must pass -NoLogin.
   -Apply         For import: write the changes. Without it, import is a dry run.
   -Only <names>  For import: only these profile names.
+
+  On 'new' and 'login', -Interactive / -DeviceCode is remembered for the profile
+  (in azswap-login) once that sign-in succeeds, so later sign-ins use it without
+  the switch. On a switch it applies to that one sign-in only.
 
 Each profile is ~/.azure-<profile>; its tenant id is in azswap-tenant inside it.
 '@
@@ -45,11 +51,14 @@ function Get-AzswapProfile {
 }
 
 # Per-profile settings are one-line files named azswap-<name> inside the profile folder
-# (azswap-tenant today). A missing file means "not set".
+# (azswap-tenant, azswap-login, azswap-account). A missing or empty file means "not set".
 function Get-AzswapSetting {
     param([string]$Dir, [string]$Name)
     $file = Join-Path $Dir "azswap-$Name"
-    if (Test-Path $file) { (Get-Content $file -Raw).Trim() }
+    if (Test-Path $file) {
+        $value = "$(Get-Content $file -Raw)".Trim()
+        if ($value) { $value }
+    }
 }
 
 function Write-AzswapSetting {
@@ -230,9 +239,11 @@ function Test-AzswapInteractive {
 # $PSCmdlet as -Cmdlet: errors then go through it, so the azswap call itself fails ($? is false,
 # pwsh -Command exits 1). -Again means the user asked to sign in again (azswap login), so the
 # suggested command does too.
+# Method: -Interactive / -DeviceCode, else the profile's azswap-login setting
+# ('interactive' or 'devicecode'), else device code.
 function Invoke-AzswapLogin {
     [Diagnostics.CodeAnalysis.SuppressMessageAttribute('PSAvoidGlobalVars', '', Justification = 'LASTEXITCODE is how callers and scripts read the result')]
-    param([string]$Dir, [switch]$Interactive, [switch]$NoLogin, [switch]$Again, [Management.Automation.PSCmdlet]$Cmdlet)
+    param([string]$Dir, [switch]$Interactive, [switch]$DeviceCode, [switch]$NoLogin, [switch]$Again, [Management.Automation.PSCmdlet]$Cmdlet)
     $name = Get-AzswapProfileName $Dir
     if ($name -and $name -notmatch $script:ProfileNamePattern) { $name = "'$($name -replace "'", "''")'" }
     $fail = {
@@ -243,18 +254,25 @@ function Invoke-AzswapLogin {
     if ($NoLogin -or -not (Test-AzswapInteractive)) {
         $global:LASTEXITCODE = 1
         $why = if ($NoLogin) { '-NoLogin was given' } else { 'this host is non-interactive' }
-        $switches = $(if ($Interactive) { ' -Interactive' })
+        $switches = $(if ($Interactive) { ' -Interactive' } elseif ($DeviceCode) { ' -DeviceCode' })
         $msg = if (-not $name) { "Sign-in needed, but $why, and '$Dir' isn't an azswap profile." }
                elseif ($Again) { "Sign-in needed, but $why. Run this in your own terminal: azswap $name; azswap login$switches" }
                else { "Sign-in needed, but $why. Run this in your own terminal: azswap $name$switches" }
         & $fail $msg 'AzswapLoginRefused'
         return
     }
+    # azswap rejects -Interactive with -DeviceCode before it gets here.
+    if (-not $Interactive -and -not $DeviceCode) { $Interactive = (Get-AzswapSetting -Dir $Dir -Name 'login') -eq 'interactive' }
     $loginArgs = @('login', '--tenant', (Get-AzswapSetting -Dir $Dir -Name 'tenant'), '-o', 'none')
     if (-not $Interactive) { $loginArgs += '--use-device-code' }
     az @loginArgs
     if ($LASTEXITCODE -ne 0) {
         $code = $LASTEXITCODE
+        # Before the error, so -ErrorAction Stop doesn't swallow it. az prints the AADSTS error
+        # itself; device-code output is on stderr, so it isn't captured to inspect.
+        if (-not $Interactive) {
+            Write-Warning "If Conditional Access blocked device code (AADSTS53003, AADSTS50097), sign in with 'azswap login -Interactive'; the profile then remembers it."
+        }
         & $fail "Sign-in failed for '$(if ($name) { $name } else { $Dir })'." 'AzswapLoginFailed'
         $global:LASTEXITCODE = $code
     }
@@ -288,13 +306,19 @@ function azswap {
 
     .PARAMETER Interactive
         Browser (WAM) sign-in instead of device code. Needed where Conditional Access
-        blocks device code.
+        blocks device code. With 'new' or 'login', once the sign-in succeeds the profile
+        remembers it (in an azswap-login file), so later sign-ins are interactive without
+        the switch. When switching, it applies to that one sign-in only.
+
+    .PARAMETER DeviceCode
+        Device code sign-in, overriding a remembered -Interactive. Remembered the same
+        way as -Interactive.
 
     .PARAMETER NoLogin
         Never sign in. Where a sign-in would start, write an error naming the command for
-        a human to run (azswap <profile>, plus -Interactive if given) and return without
-        printing the account. The call fails ($? is false, $LASTEXITCODE is 1, and
-        pwsh -Command exits 1).
+        a human to run (azswap <profile>, plus -Interactive or -DeviceCode if given) and
+        return without printing the account. The call fails ($? is false, $LASTEXITCODE
+        is 1, and pwsh -Command exits 1). A refused sign-in remembers no method.
 
         This is automatic in a non-interactive host: one with no terminal attached
         (redirected input), CI (CI, GITHUB_ACTIONS or TF_BUILD set to true), or started
@@ -333,6 +357,13 @@ function azswap {
         azswap new fabrikam fabrikam.onmicrosoft.com -Interactive
 
         Creates the fabrikam profile for that tenant and signs in through the browser.
+        Later sign-ins to fabrikam use the browser too.
+
+    .EXAMPLE
+        azswap login -DeviceCode
+
+        Signs in to the current profile with a device code, and makes device code its
+        sign-in method from now on.
 
     .EXAMPLE
         azswap list
@@ -370,6 +401,7 @@ function azswap {
         [Parameter(Position = 2)] [string]$Tenant,
         [switch]$Interactive,
         [switch]$NoLogin,
+        [switch]$DeviceCode,
         [Alias('h')] [switch]$Help,
         [switch]$Apply,
         [switch]$FromDefault,
@@ -377,6 +409,9 @@ function azswap {
     )
 
     if ($Help -or $Command -in 'help', '--help') { return $script:Usage }
+    if ($Interactive -and $DeviceCode) { return Write-Error 'Use -Interactive or -DeviceCode, not both.' }
+    # 'new' and 'login' remember an explicit method once a sign-in with it succeeds.
+    $method = if ($Interactive) { 'interactive' } elseif ($DeviceCode) { 'devicecode' }
 
     switch ($Command) {
         '' {
@@ -410,7 +445,9 @@ function azswap {
             Write-AzswapSetting -Dir $dir -Name 'tenant' -Value $Tenant
             # Re-emit the inner call's sign-in errors through this call, so 'azswap new' itself fails
             # too. Only those: Windows PowerShell also records az's discarded stderr as errors.
-            azswap $Target -Interactive:$Interactive -NoLogin:$NoLogin -ErrorAction SilentlyContinue -ErrorVariable err
+            # Not captured: az login must keep the terminal. A new folder has no token, so this signs in.
+            azswap $Target -Interactive:$Interactive -DeviceCode:$DeviceCode -NoLogin:$NoLogin -ErrorAction SilentlyContinue -ErrorVariable err
+            if ($method -and $LASTEXITCODE -eq 0) { Write-AzswapSetting -Dir $dir -Name 'login' -Value $method }
             foreach ($e in $err) { if ($e.FullyQualifiedErrorId -like 'AzswapLogin*') { $PSCmdlet.WriteError($e) } }
             return
         }
@@ -445,8 +482,9 @@ function azswap {
             if (-not (Test-Path (Join-Path $env:AZURE_CONFIG_DIR 'azswap-tenant'))) {
                 return Write-Error "'$env:AZURE_CONFIG_DIR' isn't an azswap profile. Run 'azswap <profile>'."
             }
-            Invoke-AzswapLogin -Dir $env:AZURE_CONFIG_DIR -Interactive:$Interactive -NoLogin:$NoLogin -Again -Cmdlet $PSCmdlet
+            Invoke-AzswapLogin -Dir $env:AZURE_CONFIG_DIR -Interactive:$Interactive -DeviceCode:$DeviceCode -NoLogin:$NoLogin -Again -Cmdlet $PSCmdlet
             if ($LASTEXITCODE -ne 0) { return }
+            if ($method) { Write-AzswapSetting -Dir $env:AZURE_CONFIG_DIR -Name 'login' -Value $method }
             return Show-AzswapAccount
         }
         default {
@@ -457,7 +495,7 @@ function azswap {
             $env:AZURE_CONFIG_DIR = $dir
             Invoke-AzswapNative account get-access-token -o none
             if ($LASTEXITCODE -ne 0) {
-                Invoke-AzswapLogin -Dir $dir -Interactive:$Interactive -NoLogin:$NoLogin -Cmdlet $PSCmdlet
+                Invoke-AzswapLogin -Dir $dir -Interactive:$Interactive -DeviceCode:$DeviceCode -NoLogin:$NoLogin -Cmdlet $PSCmdlet
                 if ($LASTEXITCODE -ne 0) { return }
             }
             return Show-AzswapAccount
