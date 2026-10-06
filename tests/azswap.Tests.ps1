@@ -34,7 +34,7 @@ Describe 'azswap' {
 
         # Pester itself runs non-interactive (redirected stdin in CI); these tests are about an interactive shell.
         Mock Test-AzswapInteractive -ModuleName azswap { $true }
-        Mock az -ModuleName azswap { 'user@contoso.com  Contoso Prod' } -ParameterFilter { $args[0] -eq 'account' -and $args[1] -eq 'show' }
+        Mock az -ModuleName azswap { if ($args -notcontains 'user.name') { 'user@contoso.com  Contoso Prod' } } -ParameterFilter { $args[0] -eq 'account' -and $args[1] -eq 'show' } # user.name query (account check): not signed in
         Mock az -ModuleName azswap { $global:LASTEXITCODE = 0 } -ParameterFilter { $args[0] -eq 'account' -and $args[1] -eq 'get-access-token' }
         Mock az -ModuleName azswap { $global:LASTEXITCODE = 0 } -ParameterFilter { $args[0] -eq 'login' }
     }

@@ -6,12 +6,12 @@ you running commands as the wrong account in the wrong tenant.
 
 ```text
 azswap                            Show the current profile and signed-in account
-azswap <profile> [-Interactive|-DeviceCode] [-NoLogin]
+azswap <profile> [-Interactive|-DeviceCode] [-NoLogin] [-Account <upn>]
                                   Switch profile; sign in if the token has expired
 azswap list                       List profiles with account, subscription and tenant
-azswap new <profile> <tenant> [-Interactive|-DeviceCode]
+azswap new <profile> <tenant> [-Interactive|-DeviceCode] [-Account <upn>]
                                   Create a profile and sign in
-azswap login [-Interactive|-DeviceCode] [-NoLogin]
+azswap login [-Interactive|-DeviceCode] [-NoLogin] [-Account <upn>]
                                   Sign in to the current profile again
 azswap help                       Show help (also -h, --help)
 azswap import [-Apply]            Adopt existing ~/.azure-* folders as profiles
@@ -67,8 +67,8 @@ Add-Content $PROFILE "Import-Module `"$PWD\azswap\azswap\azswap.psd1`""
 Then create a profile for each identity:
 
 ```powershell
-azswap new contoso 00000000-0000-0000-0000-000000000000
-azswap new fabrikam fabrikam.onmicrosoft.com -Interactive
+azswap new contoso 00000000-0000-0000-0000-000000000000 -Account you@contoso.com
+azswap new fabrikam fabrikam.onmicrosoft.com -Interactive -Account you.ext@fabrikam.com
 ```
 
 The tenant can be a tenant id or a domain. Tab completion covers commands and profile names.
@@ -166,6 +166,30 @@ any other PowerShell error.
 A refused sign-in records no method. If `azswap new ... -Interactive` or
 `azswap login -Interactive` is refused, run `azswap login -Interactive` in your own
 terminal to sign in and record it.
+
+## Wrong account warnings
+
+On Windows the sign-in broker offers whichever account Windows is signed in with, so
+it's easy to click through and end up with your everyday account in a profile meant
+for an admin or guest identity. Two identities can share a tenant, so the tenant alone
+can't catch it.
+
+So give each profile the account it must be signed in as, with `-Account`. It's stored in
+an `azswap-account` file. After switching or signing in, `azswap` compares it with the
+signed-in account and warns loudly if they differ. `azswap list` marks a mismatch with
+`!`, without calling `az`.
+
+```powershell
+azswap new contoso 00000000-0000-0000-0000-000000000000 -Account admin@contoso.com
+azswap contoso -Account admin@contoso.com    # set or change it for an existing profile
+azswap login -Account admin@contoso.com      # or set it while signing in again
+```
+
+Without `-Account`, `azswap new` records the account you sign in with. A profile that
+has no expected account, such as one created before this feature, warns on every switch
+until you confirm the account with `-Account`. `azswap` doesn't record it for you,
+because an existing sign-in may already be the wrong one. A refused or failed sign-in
+records nothing.
 
 ## Things that ignore `azswap`
 
