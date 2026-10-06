@@ -93,6 +93,11 @@ prints the account, so they can confirm it's the right identity.
    device code). It creates the folder, records the tenant and signs in.
 3. Check the account it prints, then set the default subscription.
 
+If the customer is already signed in to an old `~/.azure-<name>` folder or the default
+`~/.azure`, `azswap import` (or `azswap import -FromDefault`) shows what it can adopt,
+and the user adds `-Apply` to register it. It never signs in or runs `az`; signing in
+to any profile it creates is still the user's job (`azswap <name>`).
+
 ## Gotchas
 
 - **Other tools still use `~/.azure`.** The VS Code Azure extensions, Azure Functions
