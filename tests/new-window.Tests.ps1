@@ -112,11 +112,6 @@ Describe '-NewWindow' {
         Should -Invoke Open-AzswapSignInWindow -ModuleName azswap -Times 0 -Exactly
     }
 
-    It 'Test-AzswapWindows matches the real platform' {
-        $onWindows = $env:OS -eq 'Windows_NT'
-        & (Get-Module azswap) { Test-AzswapWindows } | Should -Be $onWindows
-    }
-
     It 'the refusal suggests -NewWindow on Windows' {
         New-TestProfile contoso | Out-Null
         { azswap contoso -Interactive -ErrorAction Stop } | Should -Throw '*: azswap contoso -Interactive (or: azswap contoso -Interactive -NewWindow)'
@@ -129,6 +124,13 @@ Describe '-NewWindow' {
         New-TestProfile contoso | Out-Null
         azswap contoso -ErrorAction SilentlyContinue -ErrorVariable err
         "$err" | Should -Not -BeLike '*NewWindow*'
+    }
+}
+
+Describe 'Test-AzswapWindows' {
+    # Unmocked: on the ubuntu CI job this is what makes -NewWindow fail with the platform error.
+    It 'matches the real platform' {
+        & (Get-Module azswap) { Test-AzswapWindows } | Should -Be ($env:OS -eq 'Windows_NT')
     }
 }
 
