@@ -128,7 +128,7 @@ Describe 'non-interactive hosts' {
         @(Get-ChildItem $TestDrive -Force).Count | Should -Be 0
     }
 
-    It 'accepts the profile name <_>' -ForEach @('a', 'contoso-dev', 'nhs.his', 'x_1') {
+    It 'accepts the profile name <_>' -ForEach @('a', 'contoso-dev', 'fabrikam.hr', 'x_1') {
         Mock az -ModuleName azswap { $global:LASTEXITCODE = 0 } -ParameterFilter { $args[0] -eq 'account' -and $args[1] -eq 'get-access-token' }
         azswap new $_ 'tid-1' -ErrorAction Stop | Out-Null
         Join-Path $TestDrive ".azure-$_\azswap-tenant" | Should -Exist
