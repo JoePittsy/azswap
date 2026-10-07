@@ -1,0 +1,14 @@
+{
+  "name": "azswap",
+  "description": "Claude Code plugin for azswap, per-customer Azure CLI profiles for PowerShell.",
+  "owner": {
+    "name": "Joe Pitts"
+  },
+  "plugins": [
+    {
+      "name": "azswap",
+      "source": "./",
+      "description": "The az-profiles agent skill for azswap. Install the azswap PowerShell module separately (Install-Module azswap)."
+    }
+  ]
+}

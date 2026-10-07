@@ -281,8 +281,23 @@ only when two profiles fit or none do. Claude then runs every `az` command under
 profile, checks the account before acting, stops and asks on a wrong-account warning,
 never signs in itself, and asks you to run `azswap <profile>` when a sign-in has expired.
 
-The skill reads your profiles at run time, so it needs no editing. Copy the
-`skill/az-profiles` folder into `~/.claude/skills/`.
+The skill reads your profiles at run time, so it needs no editing. Install it as a
+Claude Code plugin from this repo's marketplace, inside Claude Code:
+
+```text
+/plugin marketplace add JoePittsy/azswap
+/plugin install azswap@azswap
+```
+
+or from a shell, with `claude plugin marketplace add JoePittsy/azswap` and
+`claude plugin install azswap@azswap`. The skill then appears as `azswap:az-profiles`.
+The plugin carries only the skill: install the module itself with `Install-Module azswap`
+as above. Custom marketplaces don't update automatically, so to pick up a new release run
+`claude plugin update azswap@azswap` and start a new session (or turn on auto-update for
+the marketplace in `/plugin`).
+
+Alternatively, copy the `skill/az-profiles` folder into `~/.claude/skills/`, where it
+appears as `az-profiles`.
 
 `azswap list -AsJson` works for any script too: it prints one object per profile with
 `name`, `active`, `path`, `tenant`, `account` (signed in), `expectedAccount`,
@@ -321,16 +336,25 @@ Invoke-ScriptAnalyzer ./azswap -Recurse -Settings PSGallery
 
 The tests mock `az` and point `AZSWAP_HOME` at a scratch folder, so they never touch
 your real profiles or sign in. CI runs them on Ubuntu and on Windows, under both
-PowerShell 7 and Windows PowerShell 5.1.
+PowerShell 7 and Windows PowerShell 5.1. CI also runs `claude plugin validate --strict`
+on the Claude Code plugin manifests in [`.claude-plugin/`](.claude-plugin).
+
+The repo root is the plugin root, and Claude Code loads certain top-level folders from
+it: `skills/`, `commands/`, `agents/`, `hooks/`, plus `.mcp.json`. Don't create any of
+them unless you mean Claude to load it. In particular, files for other agent tools go
+under `integrations/<tool>/`, never a top-level `agents/` folder, which Claude Code would
+load as subagents.
 
 ## Releasing
 
-1. Bump `ModuleVersion` in [`azswap/azswap.psd1`](azswap/azswap.psd1), update
-   `ReleaseNotes`, and commit.
+1. Bump `ModuleVersion` in [`azswap/azswap.psd1`](azswap/azswap.psd1) and `version` in
+   [`.claude-plugin/plugin.json`](.claude-plugin/plugin.json) to the same version,
+   update `ReleaseNotes`, and commit. A test fails if the two differ.
 2. Tag the commit `vX.Y.Z` to match, and push the tag: `git push origin vX.Y.Z`.
-3. The Publish workflow runs the tests, checks the tag matches the manifest, and
+3. The Publish workflow runs the tests, checks the tag matches both versions, and
    publishes to the PowerShell Gallery. It needs a Gallery API key in the
-   `PSGALLERY_API_KEY` repository secret.
+   `PSGALLERY_API_KEY` repository secret. Plugin users get the new version from the
+   repo when they next update the plugin.
 
 ## Licence
 

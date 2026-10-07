@@ -72,3 +72,22 @@ jobs:
           $config.Run.Exit = $true
           $config.Output.Verbosity = 'Detailed'
           Invoke-Pester -Configuration $config
+
+  # The Claude Code plugin and marketplace manifests in .claude-plugin/. Validating needs no sign-in.
+  plugin:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Validate the marketplace and plugin
+        run: |
+          claude --version
+          claude plugin validate . --strict
+          claude plugin validate .claude-plugin/plugin.json --strict

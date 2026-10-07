@@ -1,0 +1,13 @@
+{
+  "name": "azswap",
+  "version": "0.0.2",
+  "description": "The az-profiles agent skill for azswap: picks the right per-customer Azure CLI profile before Claude runs any az command. The azswap PowerShell module must be installed separately (Install-Module azswap).",
+  "author": {
+    "name": "Joe Pitts"
+  },
+  "homepage": "https://github.com/JoePittsy/azswap",
+  "repository": "https://github.com/JoePittsy/azswap",
+  "license": "MIT",
+  "keywords": ["azure", "azure-cli", "az", "powershell", "profiles", "tenants", "skill"],
+  "skills": ["./skill/"]
+}
