@@ -1,11 +1,67 @@
 # azswap
 
-Per-customer Azure CLI profiles for PowerShell. If you work across several tenants,
-`azswap` gives each identity its own az config folder, so switching customer can't leave
-you running commands as the wrong account in the wrong tenant.
+Isolated Azure CLI profiles for PowerShell: one identity per shell, so a terminal, a
+script or an AI agent working on one customer can't touch another.
 
 [![CI](https://github.com/JoePittsy/azswap/actions/workflows/ci.yml/badge.svg)](https://github.com/JoePittsy/azswap/actions/workflows/ci.yml)
 [![PowerShell Gallery](https://img.shields.io/powershellgallery/v/azswap)](https://www.powershellgallery.com/packages/azswap)
+
+## Why azswap?
+
+The Azure CLI can already hold several accounts: `az login` once per tenant, then
+`az account set` to switch. The catch is that **there is one "current" subscription for
+your whole user account**, stored in `~/.azure`. Every terminal, script, scheduled job and
+AI agent shares it.
+
+```text
+Terminal 1 (Contoso)                    Terminal 2 (Fabrikam)
+--------------------                    ---------------------
+az account set -s contoso-prod
+                                        az account set -s fabrikam-dev
+az group delete -n rg-old --yes
+  → runs against fabrikam-dev
+```
+
+Nothing warns you. Switching in one window silently retargets every other window, and
+anything else running as you.
+
+azswap gives each profile its own Azure CLI config folder (`AZURE_CONFIG_DIR`) and points
+**only the current shell** at it:
+
+```text
+Terminal 1                              Terminal 2
+----------                              ----------
+azswap contoso                          azswap fabrikam
+az group delete -n rg-old --yes
+  → runs against contoso, always
+```
+
+Each profile has its own sign-in, token cache, default subscription and `az devops`
+settings. Nothing you do in one can change another.
+
+That isolation is what the rest is built on:
+
+- **Two identities, one tenant.** An admin account and an everyday account in the same
+  tenant can see the same subscriptions, and `az account set` picks by subscription, not
+  by account. As separate profiles they can't be confused.
+- **The right sign-in when a token expires.** Each profile remembers its tenant, its
+  sign-in method (device code, or browser where Conditional Access demands it) and the
+  account it should be. `azswap contoso` signs straight back in to the right place.
+- **A wrong-account check.** If the sign-in window hands you the wrong account (Windows
+  likes to offer the one you're signed in to the PC with), azswap warns, and `azswap run`
+  refuses to run the command.
+- **One command, one profile.** `azswap run fabrikam -- az group list` runs a single
+  command under a profile and leaves your shell alone. That's handy for scripts, and for
+  starting VS Code or Functions Core Tools under the right identity.
+- **Safe for scripts, CI and AI agents.** azswap never starts an interactive sign-in from
+  a host with nobody at the keyboard; it fails with the exact command for a person to run.
+  The [Claude Code plugin](#claude-code-skill) lets an agent pick the right profile for the
+  repo you're in.
+- **A smaller blast radius.** A logout, `az account clear` or a corrupt token cache
+  affects one profile, not every customer.
+
+**When you don't need it:** if you have one identity, and you work on one customer at a
+time in one terminal, plain `az login` and `az account set` are fine.
 
 ## Install
 
