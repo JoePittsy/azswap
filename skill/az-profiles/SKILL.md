@@ -24,6 +24,19 @@ AZURE_CONFIG_DIR=~/.azure-<name> az group list ...                    # Bash
 $env:AZURE_CONFIG_DIR = "$HOME\.azure-<name>"; az group list ...      # PowerShell
 ```
 
+Where the `azswap` PowerShell module is loaded, `azswap run` does the same for one
+executable and restores the variable afterwards. The output and `$LASTEXITCODE` come
+through, and it refuses to run as the wrong account. `-NoLogin` makes an expired token fail
+with the sign-in line for the user instead of starting a sign-in. It won't run PowerShell
+scripts or cmdlets; wrap those as `-- pwsh -NoProfile -File <script> ...`:
+
+```powershell
+azswap run <name> -NoLogin -- az group list ...                       # PowerShell with azswap
+```
+
+Use the `AZURE_CONFIG_DIR` form wherever azswap may not be loaded (Bash, or a
+`pwsh -NoProfile` call).
+
 **Never run `az` without picking a profile.** An unprefixed call uses `~/.azure`, which
 may be signed in to any tenant.
 
@@ -119,6 +132,7 @@ to any profile it creates is still the user's job (`azswap <name>`).
 - **Other tools still use `~/.azure`.** The VS Code Azure extensions, Azure Functions
   Core Tools and `DefaultAzureCredential` (through `AzureCliCredential`) ignore these
   folders unless `AZURE_CONFIG_DIR` is set in the process that starts them.
+  `azswap run <name> -- func start` (or `-- code .`) starts one under a profile.
 - **`AZURE_DEVOPS_EXT_PAT` overrides the profile's sign-in** for `az devops` / `az boards`
   if it is set. Unset it when the board answers as the wrong user.
 - On Windows, `az` output can pass through cp1252, so non-ASCII characters in

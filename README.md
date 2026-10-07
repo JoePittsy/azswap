@@ -13,6 +13,8 @@ azswap new <profile> <tenant> [-Interactive|-DeviceCode] [-Account <upn>]
                                   Create a profile and sign in
 azswap login [-Interactive|-DeviceCode] [-NoLogin] [-Account <upn>]
                                   Sign in to the current profile again
+azswap run <profile> [-Interactive|-DeviceCode] [-NoLogin] -- <command> [args...]
+                                  Run one command under a profile
 azswap help                       Show help (also -h, --help)
 azswap import [-Apply]            Adopt existing ~/.azure-* folders as profiles
 azswap import -FromDefault [-Apply]
@@ -120,6 +122,42 @@ Don't like a name? Rename the folder before you sign in
 Both modes return objects, so `-Only` takes the names from the dry run, and you can
 filter or export the results like any other PowerShell output.
 
+## Running one command under a profile
+
+`azswap run` runs a single command under a profile without switching the current shell:
+
+```powershell
+azswap run contoso -- az group list -o table
+azswap run fabrikam -- code .
+```
+
+It points `AZURE_CONFIG_DIR` at the profile, signs in first if the token has expired,
+runs the command, then puts `AZURE_CONFIG_DIR` back as it was (or unsets it), even if
+the command fails. The command's output comes straight through and `$LASTEXITCODE` is
+its exit code. A non-zero exit is also reported as an error, so `$?` is false and
+`pwsh -Command` exits non-zero. Everything after `--` goes to the command, including
+arguments that start with `-`; PowerShell still expands variables and quotes first, as
+it does for any command.
+
+`run` is for executables. It refuses PowerShell scripts, functions and cmdlets, because
+their `-Switch` arguments would arrive as plain strings and be silently ignored. Run a
+script in its own PowerShell process instead:
+
+```powershell
+azswap run contoso -- pwsh -NoProfile -File ./deploy.ps1 -DryRun
+```
+
+It won't run the command as the wrong account: if the profile is signed in as someone
+other than its expected account, `run` warns, sets `$LASTEXITCODE` to 1 and stops. The
+same goes for a sign-in it can't do: with `-NoLogin`, or in a non-interactive host, an
+expired token fails with the `azswap <profile>` command to run in your own terminal.
+
+This is also how to start tools that otherwise read `~/.azure` under a profile: VS Code
+(`azswap run fabrikam -- code .`), Azure Functions Core Tools
+(`azswap run contoso -- func start`), or anything using `DefaultAzureCredential`. They
+pick up the profile because they inherit `AZURE_CONFIG_DIR` from the process that
+starts them.
+
 ## Device code or browser sign-in?
 
 Device code is the default because it works in any terminal, including remote and
@@ -196,6 +234,7 @@ records nothing.
 Only processes that inherit `AZURE_CONFIG_DIR` from your shell use the profile. The
 VS Code Azure extensions, and anything that authenticates through `AzureCliCredential`
 (including `DefaultAzureCredential`) without that variable set, still read `~/.azure`.
+Start them with `azswap run <profile> -- <command>` to give them a profile.
 `AZURE_DEVOPS_EXT_PAT`, if it is set, overrides the profile's sign-in for `az devops`
 and `az boards`.
 
