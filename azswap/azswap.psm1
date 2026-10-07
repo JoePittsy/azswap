@@ -9,7 +9,7 @@ Usage:
   azswap                            Show the current profile and signed-in account
   azswap <profile> [-Interactive|-DeviceCode] [-NoLogin] [-Account <upn>]
                                     Switch profile; sign in if the token has expired
-  azswap list                       List profiles with account, subscription and tenant
+  azswap list [-AsJson]             List profiles with account, subscription and tenant
   azswap new <profile> <tenant> [-Interactive|-DeviceCode] [-Account <upn>]
                                     Create a profile and sign in
   azswap login [-Interactive|-DeviceCode] [-NoLogin] [-Account <upn>]
@@ -35,6 +35,8 @@ Options:
                  signed-in account differs.
   -Apply         For import: write the changes. Without it, import is a dry run.
   -Only <names>  For import: only these profile names.
+  -AsJson        For list: print the profiles as a JSON array, for scripts and
+                 agents. Like list, it never calls az.
 
   On 'new' and 'login', -Interactive / -DeviceCode is remembered for the profile
   (in azswap-login) once that sign-in succeeds, so later sign-ins use it without
@@ -56,14 +58,13 @@ function Get-AzswapProfile {
 }
 
 # Per-profile settings are one-line files named azswap-<name> inside the profile folder
-# (azswap-tenant, azswap-login, azswap-account). A missing or empty file means "not set".
+# (azswap-tenant, azswap-login, azswap-account). A missing or empty file means "not set": an
+# explicit $null, because Windows PowerShell's ConvertTo-Json writes "no output" as {}, not null.
 function Get-AzswapSetting {
     param([string]$Dir, [string]$Name)
     $file = Join-Path $Dir "azswap-$Name"
-    if (Test-Path $file) {
-        $value = "$(Get-Content $file -Raw)".Trim()
-        if ($value) { $value }
-    }
+    $value = if (Test-Path $file) { "$(Get-Content $file -Raw)".Trim() }
+    if ($value) { $value } else { $null }
 }
 
 function Write-AzswapSetting {
@@ -174,6 +175,28 @@ function Write-AzswapImport {
         # Only a folder created by this call, which holds nothing but azswap-* files.
         if ($created) { Remove-Item $Dir -Recurse -Force -ErrorAction SilentlyContinue }
         "failed: $($_.Exception.Message)"
+    }
+}
+
+# What 'azswap list' shows for each profile, read offline (no az calls): azswap-* settings
+# plus the default subscription in azureProfile.json. Unknown values are $null.
+function Get-AzswapProfileInfo {
+    Get-AzswapProfile | ForEach-Object {
+        $sub = Get-AzswapSubscription $_.FullName | Where-Object isDefault | Select-Object -First 1
+        $account = $sub.user.name
+        $expected = Get-AzswapSetting -Dir $_.FullName -Name 'account'
+        [pscustomobject]@{
+            name            = $_.Name.Substring(7)
+            active          = $_.FullName -eq $env:AZURE_CONFIG_DIR
+            path            = $_.FullName
+            tenant          = Get-AzswapSetting -Dir $_.FullName -Name 'tenant'
+            account         = $account
+            expectedAccount = $expected
+            accountMismatch = [bool]($account -and $expected -and $account -ne $expected) # -ne ignores case
+            subscription    = $sub.name
+            subscriptionId  = $sub.id
+            loginMethod     = Get-AzswapSetting -Dir $_.FullName -Name 'login'
+        }
     }
 }
 
@@ -382,6 +405,13 @@ function azswap {
         person is there to sign in. Agents whose commands run in a terminal (a pty) are
         not detected, so they must pass -NoLogin.
 
+    .PARAMETER AsJson
+        For 'list': print the profiles as a JSON array instead of a table, for scripts and
+        agents. Each object has name, active, path, tenant, account (signed in),
+        expectedAccount, accountMismatch, subscription, subscriptionId and loginMethod;
+        unknown values are null. Like 'list', it reads the profile folders only and never
+        calls az. Rejected with any other command.
+
     .PARAMETER Help
         Show the usage summary (same as 'azswap help', -h or --help).
 
@@ -433,6 +463,12 @@ function azswap {
         current profile is marked with *.
 
     .EXAMPLE
+        (azswap list -AsJson | ConvertFrom-Json) | Where-Object accountMismatch
+
+        Prints the profiles as JSON, here parsed back to find the profiles signed in as
+        the wrong account.
+
+    .EXAMPLE
         azswap run contoso -- az group list -o table
 
         Lists contoso's resource groups, signing in first if the token has expired. This
@@ -480,6 +516,7 @@ function azswap {
         [switch]$Apply,
         [switch]$FromDefault,
         [string[]]$Only,
+        [switch]$AsJson,
         [Parameter(ValueFromRemainingArguments)] [object[]]$Arguments = @()
     )
 
@@ -488,6 +525,7 @@ function azswap {
         if (-not $Account) { return Write-Error '-Account needs an account, such as user@contoso.com.' }
         if ($Help -or $Command -in '', 'list', 'import', 'help', '--help', 'run') { return Write-Error '-Account works with new, login or a profile name.' }
     }
+    if ($AsJson -and ($Help -or $Command -ne 'list')) { return Write-Error '-AsJson works only with list.' }
     # Each command takes a fixed number of positional words; the first two bind to $Target and
     # $Tenant, the rest to $Arguments. 'run' checks its own.
     $positional = @('Target', 'Tenant' | Where-Object { $PSBoundParameters.ContainsKey($_) }).Count + $Arguments.Count
@@ -511,19 +549,16 @@ function azswap {
             return "$(if ($name) { $name } else { $env:AZURE_CONFIG_DIR })  $(Show-AzswapAccount)"
         }
         'list' {
-            return Get-AzswapProfile | ForEach-Object {
-                $p = Get-Content (Join-Path $_.FullName 'azureProfile.json') -Raw -ErrorAction SilentlyContinue |
-                    ConvertFrom-Json -ErrorAction SilentlyContinue
-                $sub = $p.subscriptions | Where-Object isDefault | Select-Object -First 1
-                $expected = Get-AzswapSetting -Dir $_.FullName -Name 'account'
+            $info = @(Get-AzswapProfileInfo)
+            # -InputObject, not the pipeline: keeps 0 or 1 profiles a JSON array on 5.1 and 7.
+            if ($AsJson) { return ConvertTo-Json -InputObject $info }
+            return $info | ForEach-Object {
                 [pscustomobject]@{
-                    ' '          = if ($_.FullName -eq $env:AZURE_CONFIG_DIR) { '*' } else { '' }
-                    Profile      = $_.Name.Substring(7)
-                    Account      = if ($sub.user.name -and $expected -and $sub.user.name -ne $expected) {
-                        "! $($sub.user.name) (expects $expected)"
-                    } else { $sub.user.name }
-                    Subscription = $sub.name
-                    Tenant       = Get-AzswapSetting -Dir $_.FullName -Name 'tenant'
+                    ' '          = if ($_.active) { '*' } else { '' }
+                    Profile      = $_.name
+                    Account      = if ($_.accountMismatch) { "! $($_.account) (expects $($_.expectedAccount))" } else { $_.account }
+                    Subscription = $_.subscription
+                    Tenant       = $_.tenant
                 }
             } | Format-Table -AutoSize
         }

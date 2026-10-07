@@ -50,7 +50,7 @@ Usage:
   azswap                            Show the current profile and signed-in account
   azswap <profile> [-Interactive|-DeviceCode] [-NoLogin] [-Account <upn>]
                                     Switch profile; sign in if the token has expired
-  azswap list                       List profiles with account, subscription and tenant
+  azswap list [-AsJson]             List profiles with account, subscription and tenant
   azswap new <profile> <tenant> [-Interactive|-DeviceCode] [-Account <upn>]
                                     Create a profile and sign in
   azswap login [-Interactive|-DeviceCode] [-NoLogin] [-Account <upn>]
@@ -76,6 +76,8 @@ Options:
                  signed-in account differs.
   -Apply         For import: write the changes. Without it, import is a dry run.
   -Only <names>  For import: only these profile names.
+  -AsJson        For list: print the profiles as a JSON array, for scripts and
+                 agents. Like list, it never calls az.
 
   On 'new' and 'login', -Interactive / -DeviceCode is remembered for the profile
   (in azswap-login) once that sign-in succeeds, so later sign-ins use it without
@@ -270,16 +272,21 @@ and `az boards`.
 
 ## Claude Code skill
 
-[`skill/az-profiles/SKILL.md`](skill/az-profiles/SKILL.md) is a template skill for
-[Claude Code](https://claude.com/claude-code). It teaches Claude to work out which
-customer you're talking about from the conversation or the current repo, and to run
-every `az` command under that profile. Claude checks the account before acting, stops
-and asks on a wrong-account warning, never signs in itself, and asks you to run
-`azswap <profile>` when a sign-in has expired.
+[`skill/az-profiles/SKILL.md`](skill/az-profiles/SKILL.md) is a skill for
+[Claude Code](https://claude.com/claude-code). Before its first `az` call, Claude runs
+`azswap list -AsJson` and picks the profile itself, matching what it knows from the
+conversation (the current repo, an ADO org URL, a customer name, an account domain, a
+tenant or subscription) against your profile names, accounts and subscriptions. It asks
+only when two profiles fit or none do. Claude then runs every `az` command under that
+profile, checks the account before acting, stops and asks on a wrong-account warning,
+never signs in itself, and asks you to run `azswap <profile>` when a sign-in has expired.
 
-To use it, copy the folder to `~/.claude/skills/az-profiles/`, then fill in the
-profile and cue tables with your own customers. Your filled-in copy contains tenant
-ids and account names, so keep it out of public repos.
+The skill reads your profiles at run time, so it needs no editing. Copy the
+`skill/az-profiles` folder into `~/.claude/skills/`.
+
+`azswap list -AsJson` works for any script too: it prints one object per profile with
+`name`, `active`, `path`, `tenant`, `account` (signed in), `expectedAccount`,
+`accountMismatch`, `subscription`, `subscriptionId` and `loginMethod`, and never calls `az`.
 
 ## Similar tools
 
