@@ -7,12 +7,12 @@ azswap - per-customer Azure CLI profiles
 
 Usage:
   azswap                            Show the current profile and signed-in account
-  azswap <profile> [-Interactive|-DeviceCode] [-NoLogin] [-Account <upn>]
+  azswap <profile> [-Interactive|-DeviceCode] [-NoLogin|-NewWindow] [-Account <upn>]
                                     Switch profile; sign in if the token has expired
   azswap list [-AsJson]             List profiles with account, subscription and tenant
-  azswap new <profile> <tenant> [-Interactive|-DeviceCode] [-Account <upn>]
+  azswap new <profile> <tenant> [-Interactive|-DeviceCode] [-Account <upn>] [-NewWindow]
                                     Create a profile and sign in
-  azswap login [-Interactive|-DeviceCode] [-NoLogin] [-Account <upn>]
+  azswap login [-Interactive|-DeviceCode] [-NoLogin|-NewWindow] [-Account <upn>]
                                     Sign in to the current profile again
   azswap run <profile> [-Interactive|-DeviceCode] [-NoLogin] -- <command> [args...]
                                     Run one command under a profile
@@ -33,6 +33,10 @@ Options:
   -Account <upn> With new, login or <profile>: the account this profile must be
                  signed in as (in azswap-account). azswap warns loudly when the
                  signed-in account differs.
+  -NewWindow     With new, login or <profile>, on Windows: sign in in a new
+                 terminal window and return straight away. Works from agents and
+                 non-interactive hosts, because this shell never signs in. A
+                 switch still switches this shell. Not with -NoLogin.
   -Apply         For import: write the changes. Without it, import is a dry run.
   -Only <names>  For import: only these profile names.
   -AsJson        For list: print the profiles as a JSON array, for scripts and
@@ -259,6 +263,48 @@ function Test-AzswapInteractive {
         -not (Test-AzswapNonInteractiveArg $HostArgs)
 }
 
+function Test-AzswapWindows { [Environment]::OSVersion.Platform -eq 'Win32NT' }
+
+# Arguments for a PowerShell of this edition that signs in, for -NewWindow. The child skips
+# $PROFILE, imports this same module by path, points AZURE_CONFIG_DIR at $Dir and runs
+# 'azswap <name>', or 'azswap login' with -Login (new and login: it then records the method and
+# account, because the child is the one that signs in). It then waits for a key, so the result
+# stays on screen. Every value is a single-quoted literal, and the script travels as
+# -EncodedCommand, so nothing is re-parsed by a shell. Test hook: if AZSWAP_TEST_MARKER is set
+# (it is inherited), the child writes the sign-in's exit code to that file, since no one presses
+# the key in a test.
+function Get-AzswapSignInCommand {
+    param([string]$Dir, [string]$Name, [switch]$Login, [switch]$Interactive, [switch]$DeviceCode, [string]$Account)
+    $q = { "'" + [Management.Automation.Language.CodeGeneration]::EscapeSingleQuotedStringContent($args[0]) + "'" }
+    $call = if ($Login) { 'azswap login' } else { "azswap $(& $q $Name)" }
+    if ($Interactive) { $call += ' -Interactive' } elseif ($DeviceCode) { $call += ' -DeviceCode' }
+    if ($Account) { $call += " -Account $(& $q $Account)" }
+    $script = @(
+        if ($env:AZSWAP_HOME) { "`$env:AZSWAP_HOME = $(& $q $env:AZSWAP_HOME)" }
+        # A window a person types in is interactive, whatever CI flags the caller had.
+        'Remove-Item env:CI, env:GITHUB_ACTIONS, env:TF_BUILD -ErrorAction Ignore'
+        "`$env:AZURE_CONFIG_DIR = $(& $q $Dir)"
+        "Import-Module $(& $q (Join-Path $PSScriptRoot 'azswap.psd1'))"
+        $call
+        'if ($env:AZSWAP_TEST_MARKER) { Set-Content -LiteralPath $env:AZSWAP_TEST_MARKER "exit=$LASTEXITCODE" }'
+        "Write-Host ''; Write-Host 'Press any key to close this window.'; `$null = [Console]::ReadKey(`$true)"
+    ) -join "`n"
+    '-NoProfile', '-EncodedCommand', [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($script))
+}
+
+# Opens the -NewWindow sign-in window and returns at once: Windows Terminal if wt.exe is on
+# PATH, otherwise a new console for this edition (pwsh or powershell.exe). Tests mock this.
+function Open-AzswapSignInWindow {
+    param([string]$Dir, [string]$Name, [switch]$Login, [switch]$Interactive, [switch]$DeviceCode, [string]$Account)
+    $childArgs = Get-AzswapSignInCommand @PSBoundParameters
+    $exe = (Get-Process -Id $PID).Path
+    if (Get-Command wt.exe -CommandType Application -ErrorAction Ignore) {
+        Start-Process wt.exe -ArgumentList (@('-w', 'new', "`"$exe`"") + $childArgs)
+    } else {
+        Start-Process $exe -ArgumentList $childArgs
+    }
+}
+
 # The only place azswap signs in. Call it as a plain statement, never inside an expression:
 # az's stdout must stay the terminal, or az drops its subscription picker. Success is
 # $LASTEXITCODE -eq 0 afterwards. In a non-interactive host, or with -NoLogin, it never runs
@@ -283,9 +329,10 @@ function Invoke-AzswapLogin {
         $global:LASTEXITCODE = 1
         $why = if ($NoLogin) { '-NoLogin was given' } else { 'this host is non-interactive' }
         $switches = $(if ($Interactive) { ' -Interactive' } elseif ($DeviceCode) { ' -DeviceCode' })
+        $windows = Test-AzswapWindows
         $msg = if (-not $name) { "Sign-in needed, but $why, and '$Dir' isn't an azswap profile." }
-               elseif ($Again) { "Sign-in needed, but $why. Run this in your own terminal: azswap $name; azswap login$switches" }
-               else { "Sign-in needed, but $why. Run this in your own terminal: azswap $name$switches" }
+               elseif ($Again) { "Sign-in needed, but $why. Run this in your own terminal: azswap $name; azswap login$switches$(if ($windows) { " (or: azswap login$switches -NewWindow)" })" }
+               else { "Sign-in needed, but $why. Run this in your own terminal: azswap $name$switches$(if ($windows) { " (or: azswap $name$switches -NewWindow)" })" }
         & $fail $msg 'AzswapLoginRefused'
         return
     }
@@ -405,6 +452,17 @@ function azswap {
         person is there to sign in. Agents whose commands run in a terminal (a pty) are
         not detected, so they must pass -NoLogin.
 
+    .PARAMETER NewWindow
+        With <profile>, 'new' or 'login', on Windows: open a new terminal window that signs
+        in there (passing on -Interactive, -DeviceCode and -Account), and return straight
+        away. The window stays open showing the result and the account until a key is
+        pressed. This shell never signs in, so it works from agents and other
+        non-interactive hosts. Switching still points this shell at the profile, and
+        'new' still creates the profile first; the window's sign-in records the method and
+        account, as a sign-in here would. It uses Windows Terminal if wt.exe is on PATH,
+        otherwise a new console. Not with -NoLogin, and not supported on macOS or Linux
+        yet.
+
     .PARAMETER AsJson
         For 'list': print the profiles as a JSON array instead of a table, for scripts and
         agents. Each object has name, active, path, tenant, account (signed in),
@@ -438,6 +496,12 @@ function azswap {
 
         Switches to the contoso profile but never signs in; if the token has expired it
         fails with the command to run in an interactive terminal.
+
+    .EXAMPLE
+        azswap contoso -NewWindow
+
+        Switches this shell to contoso and opens a new window that signs in to it (if the
+        token has expired), for use from an agent or other non-interactive host.
 
     .EXAMPLE
         azswap new fabrikam fabrikam.onmicrosoft.com -Interactive
@@ -512,6 +576,7 @@ function azswap {
         [switch]$Interactive,
         [switch]$NoLogin,
         [switch]$DeviceCode,
+        [switch]$NewWindow,
         [Alias('h')] [switch]$Help,
         [switch]$Apply,
         [switch]$FromDefault,
@@ -526,6 +591,23 @@ function azswap {
         if ($Help -or $Command -in '', 'list', 'import', 'help', '--help', 'run') { return Write-Error '-Account works with new, login or a profile name.' }
     }
     if ($AsJson -and ($Help -or $Command -ne 'list')) { return Write-Error '-AsJson works only with list.' }
+    if ($NewWindow) {
+        $windowFail = {
+            param($Message, $Id)
+            $global:LASTEXITCODE = 1
+            $PSCmdlet.WriteError([Management.Automation.ErrorRecord]::new([Exception]::new($Message), $Id, 'InvalidArgument', $Command))
+        }
+        if ($NoLogin) { return & $windowFail '-NewWindow signs in, so it cannot be used with -NoLogin.' 'AzswapNewWindowUsage' }
+        if ($Help -or $Command -in '', 'list', 'import', 'help', '--help', 'run') {
+            return & $windowFail '-NewWindow works with new, login or a profile name.' 'AzswapNewWindowUsage'
+        }
+        if (-not (Test-AzswapWindows)) {
+            $cmd = switch ($Command) { 'login' { 'azswap login' } 'new' { "azswap new $Target $Tenant" } default { "azswap $Command" } }
+            return & $windowFail "-NewWindow isn't supported on this platform yet; run '$cmd' in a terminal." 'AzswapNewWindowUnsupported'
+        }
+    }
+    $opened = "Opened a sign-in window for '{0}'. Finish signing in there, then carry on."
+    $windowArgs = @{ Interactive = $Interactive; DeviceCode = $DeviceCode; Account = $Account }
     # Each command takes a fixed number of positional words; the first two bind to $Target and
     # $Tenant, the rest to $Arguments. 'run' checks its own.
     $positional = @('Target', 'Tenant' | Where-Object { $PSBoundParameters.ContainsKey($_) }).Count + $Arguments.Count
@@ -572,6 +654,13 @@ function azswap {
             if (Test-Path (Join-Path $dir 'azswap-tenant')) { return Write-Error "Profile '$Target' already exists." }
             New-Item -ItemType Directory -Force $dir | Out-Null
             Write-AzswapSetting -Dir $dir -Name 'tenant' -Value $Tenant
+            if ($NewWindow) {
+                # The window runs 'azswap login', which records the method once its sign-in succeeds.
+                if ($Account) { Write-AzswapSetting -Dir $dir -Name 'account' -Value $Account }
+                $env:AZURE_CONFIG_DIR = $dir
+                Open-AzswapSignInWindow -Dir $dir -Name $Target -Login @windowArgs
+                return $opened -f $Target
+            }
             # Re-emit the inner call's sign-in errors through this call, so 'azswap new' itself fails
             # too. Only those: Windows PowerShell also records az's discarded stderr as errors.
             # Not captured: az login must keep the terminal. A new folder has no token, so this signs in.
@@ -612,6 +701,11 @@ function azswap {
                 return Write-Error "'$env:AZURE_CONFIG_DIR' isn't an azswap profile. Run 'azswap <profile>'."
             }
             if ($Account) { Write-AzswapSetting -Dir $env:AZURE_CONFIG_DIR -Name 'account' -Value $Account }
+            if ($NewWindow) {
+                $name = Get-AzswapProfileName $env:AZURE_CONFIG_DIR
+                Open-AzswapSignInWindow -Dir $env:AZURE_CONFIG_DIR -Name $name -Login @windowArgs
+                return $opened -f $(if ($name) { $name } else { $env:AZURE_CONFIG_DIR })
+            }
             Invoke-AzswapLogin -Dir $env:AZURE_CONFIG_DIR -Interactive:$Interactive -DeviceCode:$DeviceCode -NoLogin:$NoLogin -Again -Cmdlet $PSCmdlet
             if ($LASTEXITCODE -ne 0) { return }
             if ($method) { Write-AzswapSetting -Dir $env:AZURE_CONFIG_DIR -Name 'login' -Value $method }
@@ -673,6 +767,11 @@ function azswap {
             }
             if ($Account) { Write-AzswapSetting -Dir $dir -Name 'account' -Value $Account }
             $env:AZURE_CONFIG_DIR = $dir
+            if ($NewWindow) {
+                # The window checks the token itself and signs in only if it has expired.
+                Open-AzswapSignInWindow -Dir $dir -Name $Command @windowArgs
+                return $opened -f $Command
+            }
             Invoke-AzswapNative account get-access-token -o none
             $signedIn = $false
             if ($LASTEXITCODE -ne 0) {
