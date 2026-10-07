@@ -7,6 +7,9 @@ BeforeAll {
     # Stand-in for the Azure CLI; anything not mocked fails loudly instead of signing in.
     function global:az { throw "Unmocked az call: $args" }
 
+    # The exact refusal text, without the Windows-only -NewWindow hint (new-window.Tests.ps1 covers it).
+    Mock Test-AzswapWindows -ModuleName azswap { $false }
+
     # 'run' only runs executables, so the command under test is a child PowerShell process
     # (pwsh or powershell.exe, whichever runs the tests) running echo.ps1, which prints the
     # profile and its arguments and leaves a 'ran' file behind.

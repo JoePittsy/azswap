@@ -104,12 +104,12 @@ azswap - per-customer Azure CLI profiles
 
 Usage:
   azswap                            Show the current profile and signed-in account
-  azswap <profile> [-Interactive|-DeviceCode] [-NoLogin] [-Account <upn>]
+  azswap <profile> [-Interactive|-DeviceCode] [-NoLogin|-NewWindow] [-Account <upn>]
                                     Switch profile; sign in if the token has expired
   azswap list [-AsJson]             List profiles with account, subscription and tenant
-  azswap new <profile> <tenant> [-Interactive|-DeviceCode] [-Account <upn>]
+  azswap new <profile> <tenant> [-Interactive|-DeviceCode] [-Account <upn>] [-NewWindow]
                                     Create a profile and sign in
-  azswap login [-Interactive|-DeviceCode] [-NoLogin] [-Account <upn>]
+  azswap login [-Interactive|-DeviceCode] [-NoLogin|-NewWindow] [-Account <upn>]
                                     Sign in to the current profile again
   azswap run <profile> [-Interactive|-DeviceCode] [-NoLogin] -- <command> [args...]
                                     Run one command under a profile
@@ -130,6 +130,10 @@ Options:
   -Account <upn> With new, login or <profile>: the account this profile must be
                  signed in as (in azswap-account). azswap warns loudly when the
                  signed-in account differs.
+  -NewWindow     With new, login or <profile>, on Windows: sign in in a new
+                 terminal window and return straight away. Works from agents and
+                 non-interactive hosts, because this shell never signs in. A
+                 switch still switches this shell. Not with -NoLogin.
   -Apply         For import: write the changes. Without it, import is a dry run.
   -Only <names>  For import: only these profile names.
   -AsJson        For list: print the profiles as a JSON array, for scripts and
@@ -257,6 +261,29 @@ other PowerShell error.
 A refused sign-in records no method. If `azswap new ... -Interactive` was refused, run
 `azswap login -Interactive` in your own terminal to sign in and record it.
 
+### Signing in from an agent
+
+On Windows, `-NewWindow` saves leaving the agent to find a terminal. `azswap contoso
+-NewWindow` (also `azswap login -NewWindow` and `azswap new ... -NewWindow`) opens a new
+terminal window that does the sign-in there, and returns straight away with
+`Opened a sign-in window for 'contoso'. Finish signing in there, then carry on.` The
+token lands in the profile folder, which every process shares. The calling shell never
+signs in, so this works from non-interactive hosts; a switch still points the calling
+shell at the profile, and `new` still creates the profile first. `-Interactive`,
+`-DeviceCode` and `-Account` are passed on, and the window's sign-in records the method
+and account, as a sign-in in your own terminal would.
+
+The window runs this same azswap module (by path) in Windows Terminal if `wt.exe` is on
+`PATH`, otherwise in a new console for the same PowerShell edition, without your
+`$PROFILE`. It stays open showing the result and account until you press a key. On
+Windows, a refused sign-in suggests it: `... azswap contoso (or: azswap contoso
+-NewWindow)`. `-NewWindow` doesn't combine with `-NoLogin`, and on macOS and Linux it
+fails with the command to run in a terminal instead.
+
+In Claude Code, `!` may run commands in bash, where the azswap PowerShell module doesn't
+exist, and `pwsh -Command "... azswap contoso"` is refused as non-interactive, so neither
+signs in. Ask the agent to run `azswap contoso -NewWindow` instead.
+
 ## Running one command under a profile
 
 `azswap run` runs a single command under a profile without switching the current shell:
@@ -336,6 +363,8 @@ tenant or subscription) against your profile names, accounts and subscriptions. 
 only when two profiles fit or none do. Claude then runs every `az` command under that
 profile, checks the account before acting, stops and asks on a wrong-account warning,
 never signs in itself, and asks you to run `azswap <profile>` when a sign-in has expired.
+On Windows it may offer to open a sign-in window for you with `azswap <profile> -NewWindow`,
+and does so only if you say yes.
 
 The skill reads your profiles at run time, so it needs no editing. Install it as a
 Claude Code plugin from this repo's marketplace, inside Claude Code:

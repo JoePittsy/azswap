@@ -95,7 +95,8 @@ AZURE_CONFIG_DIR=~/.azure-<name> az account show --query "{user:user.name,sub:na
 - The account is the profile's `expectedAccount` (or, with none recorded, plausibly the
   right one for the customer) → carry on.
 - `Sign-in needed, but ...`, `Please run 'az login'` or an `AADSTS` error → the session
-  has expired. **Stop** and give the user the sign-in line below. Do not continue against
+  has expired. **Stop** and give the user the sign-in line below (on Windows, offering
+  `-NewWindow`). Do not continue against
   another profile.
 - The wrong account → stop and say so. Never "make do" with whichever identity works.
 - `accountMismatch: true` in the list, `WRONG ACCOUNT: ...` from azswap, or
@@ -108,7 +109,7 @@ AZURE_CONFIG_DIR=~/.azure-<name> az account show --query "{user:user.name,sub:na
 When two identities share a tenant, the tenant id alone does not tell you which one is
 signed in. Always check the account.
 
-## Signing in (the user runs this, never a tool call)
+## Signing in (the user does this; at most, you open the window for them)
 
 Sign-in is interactive, and from a tool call it either hangs waiting for a device code
 or fails because the broker has no window. azswap refuses to sign in from non-interactive
@@ -125,6 +126,24 @@ azswap <name>
 `azswap <name>` switches that shell to the profile, tests the token, and if it has expired
 signs in to the profile's tenant with the profile's `loginMethod`. It then prints the
 account, so they can confirm it's the right identity.
+
+**On Windows you may offer to open a sign-in window instead.** `azswap <name> -NewWindow`
+(plus `-Interactive` or `-DeviceCode` if the error's command had it) opens a new terminal
+window on the user's screen that signs in there, and returns at once with
+`Opened a sign-in window for '<name>'. ...`. Your own process never signs in, so it is
+the one sign-in command you may run as a tool call, and only like this:
+
+1. **Offer it, don't just do it**: "Shall I open a sign-in window for `<name>`?" Run it
+   only after the user explicitly says yes, once per yes. Without a yes, give the line
+   above as usual.
+2. After running it, **wait** for the user to say they've finished signing in. Don't poll
+   or carry on meanwhile.
+3. Then re-check the account with the check in step 3 before any real call.
+
+Never suggest `! azswap ...` or `! pwsh -Command "... azswap <name>"` for signing in. In
+Claude Code, `!` may run bash, where the azswap PowerShell module doesn't exist, and
+`pwsh -Command` is non-interactive, so azswap refuses to sign in there. The user's own
+terminal, or `-NewWindow` after a yes, are the ways to sign in.
 
 - If the sign-in fails with `AADSTS53003`, `AADSTS50097` or another Conditional Access
   error, the tenant blocks device code. Give the user `azswap login -Interactive`
