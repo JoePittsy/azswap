@@ -17,11 +17,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check the tag matches the manifest version
+      - name: Check the tag matches the module and plugin versions
         run: |
           $version = (Import-PowerShellDataFile ./azswap/azswap.psd1).ModuleVersion
           if ('${{ github.ref_name }}' -ne "v$version") {
             throw "Tag ${{ github.ref_name }} does not match manifest version v$version."
+          }
+          $pluginVersion = (Get-Content -Raw ./.claude-plugin/plugin.json | ConvertFrom-Json).version
+          if ('${{ github.ref_name }}' -ne "v$pluginVersion") {
+            throw "Tag ${{ github.ref_name }} does not match .claude-plugin/plugin.json version v$pluginVersion."
           }
 
       - name: Publish to the PowerShell Gallery
