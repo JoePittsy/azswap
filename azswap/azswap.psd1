@@ -1,6 +1,6 @@
 @{
     RootModule           = 'azswap.psm1'
-    ModuleVersion        = '0.0.1'
+    ModuleVersion        = '0.0.2'
     GUID                 = 'fe50d101-a90f-4f2e-a31e-7b5e9b90e4c2'
     Author               = 'Joe Pitts'
     Copyright            = '(c) Joe Pitts. MIT licence.'
@@ -17,6 +17,10 @@
             LicenseUri = 'https://github.com/JoePittsy/azswap/blob/main/LICENSE'
             ProjectUri = 'https://github.com/JoePittsy/azswap'
             ReleaseNotes = @'
+0.0.2
+- azswap list -AsJson prints every profile as JSON (name, active, path, tenant, signed-in and expected account, mismatch flag, default subscription, sign-in method). Offline: it never calls az.
+- The agent skill in skill/az-profiles is now generic: it reads azswap list -AsJson and works without editing.
+
 0.0.1 - first public release.
 - azswap <profile> switches the shell's AZURE_CONFIG_DIR and signs in to the profile's tenant when the token has expired.
 - azswap new, login, list and help; tab completion for commands and profile names.
