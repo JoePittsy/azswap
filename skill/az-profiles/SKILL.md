@@ -26,13 +26,17 @@ $env:AZURE_CONFIG_DIR = "$HOME\.azure-<name>"; az group list ...      # PowerShe
 
 Where the `azswap` PowerShell module is loaded, `azswap run` does the same for one
 executable and restores the variable afterwards. The output and `$LASTEXITCODE` come
-through, and it refuses to run as the wrong account. `-NoLogin` makes an expired token fail
-with the sign-in line for the user instead of starting a sign-in. It won't run PowerShell
-scripts or cmdlets; wrap those as `-- pwsh -NoProfile -File <script> ...`:
+through. Always pass `-NoLogin`: an expired token then fails with the sign-in line for the
+user instead of starting a sign-in. It won't run PowerShell scripts or cmdlets; wrap those
+as `-- pwsh -NoProfile -File <script> ...`:
 
 ```powershell
 azswap run <name> -NoLogin -- az group list ...                       # PowerShell with azswap
 ```
+
+`run` refuses, with an error and `$LASTEXITCODE` 1, when the profile is signed in as the
+wrong account (`Wrong account for '<name>'`) or needs a sign-in (`Sign-in needed, but ...`).
+The command did not run. Treat both as **stop**: see the sections below.
 
 Use the `AZURE_CONFIG_DIR` form wherever azswap may not be loaded (Bash, or a
 `pwsh -NoProfile` call).
@@ -75,13 +79,17 @@ signed in. Always check the account.
 ```bash
 AZURE_CONFIG_DIR=~/.azure-<name> az account show --query "{user:user.name,sub:name,tenant:tenantId}" -o tsv
 ```
+```powershell
+azswap run <name> -NoLogin -- az account show --query "{user:user.name,sub:name,tenant:tenantId}" -o tsv
+```
 
 - The account matches the table → carry on.
 - `Please run 'az login'` or an `AADSTS` error → the session has expired. **Stop**
   and give the user the sign-in line below. Do not continue against another profile.
 - The wrong account → stop and say so. Never "make do" with whichever identity works.
 - `azswap` itself warns `WRONG ACCOUNT: ...` when a profile is signed in as someone other
-  than its expected account, and `azswap list` marks the profile with `!`. Treat either as
+  than its expected account, `azswap run` refuses with `Wrong account for '<name>'`, and
+  `azswap list` marks the profile with `!`. Treat any of these as
   **stop and tell the user**: quote the warning and ask which account is right. Don't
   assume the recorded account is the right one, and never run
   `azswap <name> -Account ...` to silence the warning until the user has confirmed the
@@ -91,9 +99,11 @@ AZURE_CONFIG_DIR=~/.azure-<name> az account show --query "{user:user.name,sub:na
 
 Sign-in is interactive, and from a tool call it either hangs waiting for a device code
 or fails because the broker has no window. azswap refuses to sign in from non-interactive
-hosts and prints the command for the user to run instead. If your commands run in a
-terminal (a pty), azswap can't tell, so pass `-NoLogin`. Give the user one line to run in
-their own terminal:
+hosts (no terminal attached, CI, `-NonInteractive`) and fails with an error naming the
+command for the user to run instead. If your commands run in a terminal (a pty), azswap
+can't tell, so pass `-NoLogin` to every `azswap <name>` or `azswap run` call. Never
+run `azswap new` or `azswap login` yourself to fix a sign-in. Give the user one line to
+run in their own terminal, the one from the error if there is one:
 
 ```powershell
 azswap <name>
