@@ -1,10 +1,14 @@
 # azswap
 
-Isolated Azure CLI profiles for PowerShell: one identity per shell, so a terminal, a
-script or an AI agent working on one customer can't touch another.
+**Isolated Azure CLI (`az`) profiles for PowerShell.** Switch between multiple Azure
+tenants, accounts and subscriptions per terminal, not machine-wide, so a shell, a script
+or an AI coding agent working on one customer can't touch another. Built for consultants,
+MSPs and anyone running several Azure identities side by side, including several AI agents
+at once.
 
 [![CI](https://github.com/JoePittsy/azswap/actions/workflows/ci.yml/badge.svg)](https://github.com/JoePittsy/azswap/actions/workflows/ci.yml)
 [![PowerShell Gallery](https://img.shields.io/powershellgallery/v/azswap)](https://www.powershellgallery.com/packages/azswap)
+[![Claude Code plugin](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FJoePittsy%2Fazswap%2Fmain%2F.claude-plugin%2Fplugin.json&query=%24.version&label=Claude%20Code%20plugin&color=D97757)](#claude-code-skill)
 
 ## Why azswap?
 
@@ -63,6 +67,30 @@ That isolation is what the rest is built on:
 **When you don't need it:** if you have one identity, and you work on one customer at a
 time in one terminal, plain `az login` and `az account set` are fine.
 
+## Built for AI agents
+
+AI coding agents such as Claude Code, GitHub Copilot, Codex and Cursor run `az` on your
+behalf, often in several sessions at once. With plain `az`, they all share the same
+machine-wide login, so one agent's `az account set` silently changes the tenant every
+other agent is working in. azswap makes parallel agents safe:
+
+- **Several agents, several customers, at the same time.** Each session works under its
+  own profile, through its own shell or `azswap run <profile> -- az ...`, so an agent on
+  Contoso and an agent on Fabrikam can run side by side without ever seeing each other's
+  login or subscription.
+- **A limited blast radius.** An agent pinned to a profile can only reach that identity's
+  tenant and subscriptions. A mistake, or a confused agent, stays inside one customer.
+- **The wrong account is caught.** `azswap run` refuses to run the command if the profile
+  is signed in as someone other than expected, and returns a non-zero exit code the agent
+  can't miss.
+- **No hung sessions.** azswap never starts an interactive sign-in from an agent's tool
+  call. It fails fast with the exact command for you to run, or, on Windows, the agent
+  can offer to open a sign-in window (`azswap <profile> -NewWindow`) for you to complete.
+- **The agent picks the profile.** The [Claude Code plugin](#claude-code-skill) reads
+  `azswap list -AsJson` and matches the repo, Azure DevOps org or customer you're talking
+  about to the right profile, asking only when it isn't sure. Integrations for other
+  agents are [in progress](https://github.com/JoePittsy/azswap/issues/10).
+
 ## Install
 
 Requires PowerShell 7 or Windows PowerShell 5.1, and the
@@ -86,6 +114,19 @@ Add-Content $PROFILE "Import-Module `"$PWD\azswap\azswap\azswap.psd1`""
 . $PROFILE
 ```
 
+### Claude Code plugin
+
+If you use [Claude Code](https://claude.com/claude-code), add the plugin too, so Claude picks
+the right profile before it runs any `az` command. Run these inside Claude Code:
+
+```text
+/plugin marketplace add JoePittsy/azswap
+/plugin install azswap@azswap
+```
+
+The plugin carries only the agent skill, so install the module above as well. See
+[Claude Code skill](#claude-code-skill) for what it does and how to update it.
+
 ## Quick start
 
 ```powershell
@@ -94,6 +135,14 @@ Add-Content $PROFILE 'Import-Module azswap'    # then open a new shell
 azswap new contoso 00000000-0000-0000-0000-000000000000 -Account you@contoso.com
 azswap contoso                                 # switch this shell to contoso
 azswap list                                    # every profile, its account and tenant
+```
+
+Using Claude Code? Add the plugin, and Claude will pick the right profile for the repo
+you're in:
+
+```text
+/plugin marketplace add JoePittsy/azswap
+/plugin install azswap@azswap
 ```
 
 The tenant can be a tenant id or a domain. Tab completion covers commands and profile
