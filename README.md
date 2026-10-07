@@ -4,44 +4,8 @@ Per-customer Azure CLI profiles for PowerShell. If you work across several tenan
 `azswap` gives each identity its own az config folder, so switching customer can't leave
 you running commands as the wrong account in the wrong tenant.
 
-```text
-azswap                            Show the current profile and signed-in account
-azswap <profile> [-Interactive|-DeviceCode] [-NoLogin] [-Account <upn>]
-                                  Switch profile; sign in if the token has expired
-azswap list                       List profiles with account, subscription and tenant
-azswap new <profile> <tenant> [-Interactive|-DeviceCode] [-Account <upn>]
-                                  Create a profile and sign in
-azswap login [-Interactive|-DeviceCode] [-NoLogin] [-Account <upn>]
-                                  Sign in to the current profile again
-azswap run <profile> [-Interactive|-DeviceCode] [-NoLogin] -- <command> [args...]
-                                  Run one command under a profile
-azswap help                       Show help (also -h, --help)
-azswap import [-Apply]            Adopt existing ~/.azure-* folders as profiles
-azswap import -FromDefault [-Apply]
-                                  Split ~/.azure into a profile per account
-```
-
-## How it works
-
-The Azure CLI keeps everything (sign-ins, token cache, default subscription, `az devops`
-settings) in one config folder, `~/.azure` by default. It uses whatever folder the
-`AZURE_CONFIG_DIR` environment variable names instead.
-
-`azswap` gives each profile its own folder, `~/.azure-<profile>`, and records the
-profile's tenant in an `azswap-tenant` file inside it. `azswap <profile>` then:
-
-1. Points `AZURE_CONFIG_DIR` at that folder for the current shell.
-2. Checks the token, and signs in to the profile's tenant if the token has expired:
-   device code by default, or browser sign-in with `-Interactive`.
-3. Prints the signed-in account and subscription.
-
-There's no shared state between shells: each window can use a different profile.
-
-Profile folders live in your home folder. Set the `AZSWAP_HOME` environment variable to
-keep them somewhere else; `azswap` then looks for `$env:AZSWAP_HOME/.azure-<profile>`.
-The tests use it to work in a scratch folder.
-
-`Get-Help azswap -Full` has the full reference and examples.
+[![CI](https://github.com/JoePittsy/azswap/actions/workflows/ci.yml/badge.svg)](https://github.com/JoePittsy/azswap/actions/workflows/ci.yml)
+[![PowerShell Gallery](https://img.shields.io/powershellgallery/v/azswap)](https://www.powershellgallery.com/packages/azswap)
 
 ## Install
 
@@ -58,7 +22,7 @@ PowerShell would autoload the module the first time you run `azswap`, but tab co
 is registered when the module is imported, so it only appears after that first run.
 The `Import-Module` line in `$PROFILE` gives you completion from the start.
 
-### From source
+To run it from a clone instead:
 
 ```powershell
 git clone https://github.com/JoePittsy/azswap.git
@@ -66,14 +30,80 @@ Add-Content $PROFILE "Import-Module `"$PWD\azswap\azswap\azswap.psd1`""
 . $PROFILE
 ```
 
-Then create a profile for each identity:
+## Quick start
 
 ```powershell
+Install-Module azswap -Scope CurrentUser
+Add-Content $PROFILE 'Import-Module azswap'    # then open a new shell
 azswap new contoso 00000000-0000-0000-0000-000000000000 -Account you@contoso.com
-azswap new fabrikam fabrikam.onmicrosoft.com -Interactive -Account you.ext@fabrikam.com
+azswap contoso                                 # switch this shell to contoso
+azswap list                                    # every profile, its account and tenant
 ```
 
-The tenant can be a tenant id or a domain. Tab completion covers commands and profile names.
+The tenant can be a tenant id or a domain. Tab completion covers commands and profile
+names. `Get-Help azswap -Full` has the full reference and examples.
+
+```text
+azswap - per-customer Azure CLI profiles
+
+Usage:
+  azswap                            Show the current profile and signed-in account
+  azswap <profile> [-Interactive|-DeviceCode] [-NoLogin] [-Account <upn>]
+                                    Switch profile; sign in if the token has expired
+  azswap list                       List profiles with account, subscription and tenant
+  azswap new <profile> <tenant> [-Interactive|-DeviceCode] [-Account <upn>]
+                                    Create a profile and sign in
+  azswap login [-Interactive|-DeviceCode] [-NoLogin] [-Account <upn>]
+                                    Sign in to the current profile again
+  azswap run <profile> [-Interactive|-DeviceCode] [-NoLogin] -- <command> [args...]
+                                    Run one command under a profile
+  azswap help                       Show this help (also -h, --help)
+  azswap import [-Apply]            Adopt existing ~/.azure-* folders as profiles
+  azswap import -FromDefault [-Apply]
+                                    Split ~/.azure into a profile per account
+
+Options:
+  -Interactive   Browser (WAM) sign-in instead of device code. Needed where
+                 Conditional Access blocks device code.
+  -DeviceCode    Device code sign-in, overriding a remembered -Interactive.
+  -NoLogin       Never sign in. Where a sign-in is needed, fail with the command
+                 to run instead. Always on in hosts with no terminal attached
+                 (redirected input), in CI (CI, GITHUB_ACTIONS or TF_BUILD set to
+                 true) and under -NonInteractive. Agents whose commands run in a
+                 terminal (a pty) aren't detected and must pass -NoLogin.
+  -Account <upn> With new, login or <profile>: the account this profile must be
+                 signed in as (in azswap-account). azswap warns loudly when the
+                 signed-in account differs.
+  -Apply         For import: write the changes. Without it, import is a dry run.
+  -Only <names>  For import: only these profile names.
+
+  On 'new' and 'login', -Interactive / -DeviceCode is remembered for the profile
+  (in azswap-login) once that sign-in succeeds, so later sign-ins use it without
+  the switch. On a switch it applies to that one sign-in only.
+
+Each profile is ~/.azure-<profile>; its tenant id is in azswap-tenant inside it.
+```
+
+## How it works
+
+The Azure CLI keeps everything (sign-ins, token cache, default subscription, `az devops`
+settings) in one config folder, `~/.azure` by default. It uses whatever folder the
+`AZURE_CONFIG_DIR` environment variable names instead.
+
+`azswap` gives each profile its own folder, `~/.azure-<profile>`, and records the
+profile's tenant in an `azswap-tenant` file inside it. `azswap <profile>` then:
+
+1. Points `AZURE_CONFIG_DIR` at that folder for the current shell.
+2. Checks the token, and signs in to the profile's tenant if the token has expired,
+   with the profile's sign-in method (see below).
+3. Prints the signed-in account and subscription, and warns if it isn't the account
+   the profile expects.
+
+There's no shared state between shells: each window can use a different profile.
+
+Profile folders live in your home folder. Set the `AZSWAP_HOME` environment variable to
+keep them somewhere else; `azswap` then looks for `$env:AZSWAP_HOME/.azure-<profile>`.
+The tests use it to work in a scratch folder.
 
 ## Moving to azswap
 
@@ -122,42 +152,6 @@ Don't like a name? Rename the folder before you sign in
 Both modes return objects, so `-Only` takes the names from the dry run, and you can
 filter or export the results like any other PowerShell output.
 
-## Running one command under a profile
-
-`azswap run` runs a single command under a profile without switching the current shell:
-
-```powershell
-azswap run contoso -- az group list -o table
-azswap run fabrikam -- code .
-```
-
-It points `AZURE_CONFIG_DIR` at the profile, signs in first if the token has expired,
-runs the command, then puts `AZURE_CONFIG_DIR` back as it was (or unsets it), even if
-the command fails. The command's output comes straight through and `$LASTEXITCODE` is
-its exit code. A non-zero exit is also reported as an error, so `$?` is false and
-`pwsh -Command` exits non-zero. Everything after `--` goes to the command, including
-arguments that start with `-`; PowerShell still expands variables and quotes first, as
-it does for any command.
-
-`run` is for executables. It refuses PowerShell scripts, functions and cmdlets, because
-their `-Switch` arguments would arrive as plain strings and be silently ignored. Run a
-script in its own PowerShell process instead:
-
-```powershell
-azswap run contoso -- pwsh -NoProfile -File ./deploy.ps1 -DryRun
-```
-
-It won't run the command as the wrong account: if the profile is signed in as someone
-other than its expected account, `run` warns, sets `$LASTEXITCODE` to 1 and stops. The
-same goes for a sign-in it can't do: with `-NoLogin`, or in a non-interactive host, an
-expired token fails with the `azswap <profile>` command to run in your own terminal.
-
-This is also how to start tools that otherwise read `~/.azure` under a profile: VS Code
-(`azswap run fabrikam -- code .`), Azure Functions Core Tools
-(`azswap run contoso -- func start`), or anything using `DefaultAzureCredential`. They
-pick up the profile because they inherit `AZURE_CONFIG_DIR` from the process that
-starts them.
-
 ## Device code or browser sign-in?
 
 Device code is the default because it works in any terminal, including remote and
@@ -169,13 +163,13 @@ Each profile remembers its method, so you only say it once. A method you name on
 or `login` is recorded in an `azswap-login` file in the profile folder once a sign-in
 with it succeeds:
 
-- `azswap new <profile> <tenant> -Interactive` records `interactive`.
-- `azswap login -Interactive` or `azswap login -DeviceCode` signs in that way and
-  records it, which is how you change an existing profile.
-- `azswap <profile> -Interactive` or `-DeviceCode` overrides the method for that one
-  sign-in without changing what's recorded.
+```powershell
+azswap new fabrikam fabrikam.onmicrosoft.com -Interactive -Account you.ext@fabrikam.com
+azswap login -DeviceCode    # sign in to the current profile again, and switch it to device code
+azswap fabrikam -DeviceCode # this one sign-in only; what's recorded doesn't change
+```
 
-A refused or failed sign-in records nothing. A profile with no `azswap-login` file
+A refused or failed sign-in records nothing, and a profile with no `azswap-login` file
 uses device code. If a device-code sign-in fails, `azswap` suggests
 `azswap login -Interactive`.
 
@@ -197,15 +191,45 @@ doesn't print the account. `azswap login` fails the same way, suggesting
 `azswap contoso; azswap login`, and `azswap new` creates the profile without signing in.
 
 The failure is a normal PowerShell error: `$?` is false, `$LASTEXITCODE` is 1, and
-`pwsh -Command` exits with 1. A sign-in that `az login` itself rejects fails the same way. A `pwsh -File` script exits non-zero only if it stops on
-errors (`$ErrorActionPreference = 'Stop'`, or `-ErrorAction Stop` on the call), as with
-any other PowerShell error.
+`pwsh -Command` exits with 1. A sign-in that `az login` itself rejects fails the same
+way. A `pwsh -File` script exits non-zero only if it stops on errors
+(`$ErrorActionPreference = 'Stop'`, or `-ErrorAction Stop` on the call), as with any
+other PowerShell error.
 
-A refused sign-in records no method. If `azswap new ... -Interactive` or
-`azswap login -Interactive` is refused, run `azswap login -Interactive` in your own
-terminal to sign in and record it.
+A refused sign-in records no method. If `azswap new ... -Interactive` was refused, run
+`azswap login -Interactive` in your own terminal to sign in and record it.
 
-## Wrong account warnings
+## Running one command under a profile
+
+`azswap run` runs a single command under a profile without switching the current shell:
+
+```powershell
+azswap run contoso -- az group list -o table
+azswap run contoso -NoLogin -- az account show   # from a script or agent
+```
+
+It points `AZURE_CONFIG_DIR` at the profile, signs in first if the token has expired,
+runs the command, then puts `AZURE_CONFIG_DIR` back as it was (or unsets it), even if
+the command fails. The command's output comes straight through and `$LASTEXITCODE` is
+its exit code. A non-zero exit is also reported as an error, so `$?` is false and
+`pwsh -Command` exits non-zero. Everything after `--` goes to the command, including
+arguments that start with `-`; PowerShell still expands variables and quotes first, as
+it does for any command.
+
+It won't run the command as the wrong account: if the profile is signed in as someone
+other than its expected account, `run` warns, sets `$LASTEXITCODE` to 1 and stops. A
+sign-in it can't do (with `-NoLogin`, or in a non-interactive host) fails the same way,
+with the `azswap <profile>` command to run in your own terminal.
+
+`run` is for executables. It refuses PowerShell scripts, functions and cmdlets, because
+their `-Switch` arguments would arrive as plain strings and be silently ignored. Run a
+script in its own PowerShell process instead:
+
+```powershell
+azswap run contoso -- pwsh -NoProfile -File ./deploy.ps1 -DryRun
+```
+
+## Wrong-account warnings
 
 On Windows the sign-in broker offers whichever account Windows is signed in with, so
 it's easy to click through and end up with your everyday account in a profile meant
@@ -214,8 +238,8 @@ can't catch it.
 
 So give each profile the account it must be signed in as, with `-Account`. It's stored in
 an `azswap-account` file. After switching or signing in, `azswap` compares it with the
-signed-in account and warns loudly if they differ. `azswap list` marks a mismatch with
-`!`, without calling `az`.
+signed-in account and warns loudly (`WRONG ACCOUNT: ...`) if they differ; `run` refuses
+to run the command. `azswap list` marks a mismatch with `!`, without calling `az`.
 
 ```powershell
 azswap new contoso 00000000-0000-0000-0000-000000000000 -Account admin@contoso.com
@@ -223,18 +247,24 @@ azswap contoso -Account admin@contoso.com    # set or change it for an existing 
 azswap login -Account admin@contoso.com      # or set it while signing in again
 ```
 
-Without `-Account`, `azswap new` records the account you sign in with. A profile that
-has no expected account, such as one created before this feature, warns on every switch
-until you confirm the account with `-Account`. `azswap` doesn't record it for you,
-because an existing sign-in may already be the wrong one. A refused or failed sign-in
-records nothing.
+Without `-Account`, the account of the profile's first successful `azswap` sign-in is
+recorded. A profile that has no expected account and is already signed in (an imported
+folder, or one from before this feature) warns on every switch until you confirm the
+account with `-Account`. `azswap` doesn't record it for you, because an existing sign-in
+may already be the wrong one.
 
-## Things that ignore `azswap`
+## Things that ignore azswap
 
 Only processes that inherit `AZURE_CONFIG_DIR` from your shell use the profile. The
-VS Code Azure extensions, and anything that authenticates through `AzureCliCredential`
-(including `DefaultAzureCredential`) without that variable set, still read `~/.azure`.
-Start them with `azswap run <profile> -- <command>` to give them a profile.
+VS Code Azure extensions, Azure Functions Core Tools, and anything that authenticates
+through `AzureCliCredential` (including `DefaultAzureCredential`) still read `~/.azure`
+when started without it. Start them under a profile with `azswap run`:
+
+```powershell
+azswap run fabrikam -- code .
+azswap run contoso -- func start
+```
+
 `AZURE_DEVOPS_EXT_PAT`, if it is set, overrides the profile's sign-in for `az devops`
 and `az boards`.
 
@@ -243,8 +273,9 @@ and `az boards`.
 [`skill/az-profiles/SKILL.md`](skill/az-profiles/SKILL.md) is a template skill for
 [Claude Code](https://claude.com/claude-code). It teaches Claude to work out which
 customer you're talking about from the conversation or the current repo, and to run
-every `az` command under that profile. Claude checks the account before acting, and
-asks you to run `azswap <profile>` when a sign-in has expired.
+every `az` command under that profile. Claude checks the account before acting, stops
+and asks on a wrong-account warning, never signs in itself, and asks you to run
+`azswap <profile>` when a sign-in has expired.
 
 To use it, copy the folder to `~/.claude/skills/az-profiles/`, then fill in the
 profile and cue tables with your own customers. Your filled-in copy contains tenant
@@ -260,10 +291,19 @@ ids and account names, so keep it out of public repos.
 - [azctx](https://github.com/iul1an/azctx) switches subscriptions inside a disposable
   per-shell copy of `~/.azure`. It runs on Linux and macOS.
 
-What azswap adds is that each profile knows its tenant, so an expired session signs
-straight back in to the right place. The Claude Code skill also picks the profile
-from context (the repo you're in, the ADO org or the customer you mention) instead of
-asking.
+What azswap adds:
+
+- **Remembered tenant and sign-in method.** An expired session signs straight back in
+  to the right tenant, by device code or browser as the profile needs.
+- **A wrong-account check.** Each profile knows the account it should be signed in as,
+  and azswap warns (and `run` refuses) when it isn't.
+- **`run`** for one command, or a tool such as VS Code, under a profile without
+  switching the shell.
+- **`import`** to adopt existing `~/.azure-*` folders or split up `~/.azure`.
+- **Safe in non-interactive hosts.** Scripts, CI and agents get an error naming the
+  command to run, never a hung sign-in.
+- **An agent skill** that picks the profile from context (the repo you're in, the ADO
+  org or the customer you mention) instead of asking.
 
 ## Development
 
@@ -273,11 +313,13 @@ Invoke-ScriptAnalyzer ./azswap -Recurse -Settings PSGallery
 ```
 
 The tests mock `az` and point `AZSWAP_HOME` at a scratch folder, so they never touch
-your real profiles or sign in. CI runs both on Windows and Ubuntu.
+your real profiles or sign in. CI runs them on Ubuntu and on Windows, under both
+PowerShell 7 and Windows PowerShell 5.1.
 
-### Releasing
+## Releasing
 
-1. Bump `ModuleVersion` in [`azswap/azswap.psd1`](azswap/azswap.psd1) and commit.
+1. Bump `ModuleVersion` in [`azswap/azswap.psd1`](azswap/azswap.psd1), update
+   `ReleaseNotes`, and commit.
 2. Tag the commit `vX.Y.Z` to match, and push the tag: `git push origin vX.Y.Z`.
 3. The Publish workflow runs the tests, checks the tag matches the manifest, and
    publishes to the PowerShell Gallery. It needs a Gallery API key in the
