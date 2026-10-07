@@ -5,6 +5,7 @@ script or an AI agent working on one customer can't touch another.
 
 [![CI](https://github.com/JoePittsy/azswap/actions/workflows/ci.yml/badge.svg)](https://github.com/JoePittsy/azswap/actions/workflows/ci.yml)
 [![PowerShell Gallery](https://img.shields.io/powershellgallery/v/azswap)](https://www.powershellgallery.com/packages/azswap)
+[![Claude Code plugin](https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2FJoePittsy%2Fazswap%2Fmain%2F.claude-plugin%2Fplugin.json&query=%24.version&label=Claude%20Code%20plugin&color=D97757)](#claude-code-skill)
 
 ## Why azswap?
 
@@ -86,6 +87,19 @@ Add-Content $PROFILE "Import-Module `"$PWD\azswap\azswap\azswap.psd1`""
 . $PROFILE
 ```
 
+### Claude Code plugin
+
+If you use [Claude Code](https://claude.com/claude-code), add the plugin too, so Claude picks
+the right profile before it runs any `az` command. Run these inside Claude Code:
+
+```text
+/plugin marketplace add JoePittsy/azswap
+/plugin install azswap@azswap
+```
+
+The plugin carries only the agent skill, so install the module above as well. See
+[Claude Code skill](#claude-code-skill) for what it does and how to update it.
+
 ## Quick start
 
 ```powershell
@@ -94,6 +108,14 @@ Add-Content $PROFILE 'Import-Module azswap'    # then open a new shell
 azswap new contoso 00000000-0000-0000-0000-000000000000 -Account you@contoso.com
 azswap contoso                                 # switch this shell to contoso
 azswap list                                    # every profile, its account and tenant
+```
+
+Using Claude Code? Add the plugin, and Claude will pick the right profile for the repo
+you're in:
+
+```text
+/plugin marketplace add JoePittsy/azswap
+/plugin install azswap@azswap
 ```
 
 The tenant can be a tenant id or a domain. Tab completion covers commands and profile
