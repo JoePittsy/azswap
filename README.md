@@ -133,9 +133,19 @@ azswap run fabrikam -- code .
 
 It points `AZURE_CONFIG_DIR` at the profile, signs in first if the token has expired,
 runs the command, then puts `AZURE_CONFIG_DIR` back as it was (or unsets it), even if
-the command fails. The command's output and exit code (`$LASTEXITCODE`) come straight
-through, so scripts can rely on them. Everything after `--` is passed to the command
-unchanged, including arguments that start with `-`.
+the command fails. The command's output comes straight through and `$LASTEXITCODE` is
+its exit code. A non-zero exit is also reported as an error, so `$?` is false and
+`pwsh -Command` exits non-zero. Everything after `--` goes to the command, including
+arguments that start with `-`; PowerShell still expands variables and quotes first, as
+it does for any command.
+
+`run` is for executables. It refuses PowerShell scripts, functions and cmdlets, because
+their `-Switch` arguments would arrive as plain strings and be silently ignored. Run a
+script in its own PowerShell process instead:
+
+```powershell
+azswap run contoso -- pwsh -NoProfile -File ./deploy.ps1 -DryRun
+```
 
 It won't run the command as the wrong account: if the profile is signed in as someone
 other than its expected account, `run` warns, sets `$LASTEXITCODE` to 1 and stops. The

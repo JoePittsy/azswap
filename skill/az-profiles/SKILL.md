@@ -25,9 +25,10 @@ $env:AZURE_CONFIG_DIR = "$HOME\.azure-<name>"; az group list ...      # PowerShe
 ```
 
 Where the `azswap` PowerShell module is loaded, `azswap run` does the same for one
-command and restores the variable afterwards. It passes the output and exit code through,
-and refuses to run as the wrong account. `-NoLogin` makes an expired token fail with the
-sign-in line for the user instead of starting a sign-in:
+executable and restores the variable afterwards. The output and `$LASTEXITCODE` come
+through, and it refuses to run as the wrong account. `-NoLogin` makes an expired token fail
+with the sign-in line for the user instead of starting a sign-in. It won't run PowerShell
+scripts or cmdlets; wrap those as `-- pwsh -NoProfile -File <script> ...`:
 
 ```powershell
 azswap run <name> -NoLogin -- az group list ...                       # PowerShell with azswap

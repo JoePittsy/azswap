@@ -329,10 +329,12 @@ function azswap {
         Commands: (none) shows the current profile; <profile> switches; list, new, login,
         import, run and help. Run 'azswap help' for a one-screen summary.
 
-        'azswap run <profile> -- <command>' runs one command under a profile without
-        changing the current shell's profile, then restores AZURE_CONFIG_DIR. It passes the
-        command's output and $LASTEXITCODE through. It refuses to run the command if the
-        profile is signed in as the wrong account.
+        'azswap run <profile> -- <command>' runs one executable under a profile without
+        changing the current shell's profile, then restores AZURE_CONFIG_DIR. The command's
+        output and $LASTEXITCODE come through, and a non-zero exit is also reported as an
+        error, so $? is false. It refuses to run the command if the profile is signed in as
+        the wrong account, and refuses PowerShell scripts, functions and cmdlets (wrap them:
+        azswap run <profile> -- pwsh -NoProfile -File <script> [args...]).
 
         Profile folders live in $HOME, or in $env:AZSWAP_HOME if that is set.
 
@@ -348,7 +350,8 @@ function azswap {
         the command's name, which follows '--'.
 
     .PARAMETER Arguments
-        For 'run': the command's arguments, everything after its name, passed verbatim.
+        For 'run': the command's arguments, everything after its name. PowerShell parses them
+        as usual (variables, quotes); arguments that start with '-' are passed on as they are.
         Other commands reject extra arguments.
 
     .PARAMETER Account
@@ -477,7 +480,7 @@ function azswap {
         [switch]$Apply,
         [switch]$FromDefault,
         [string[]]$Only,
-        [Parameter(ValueFromRemainingArguments)] [string[]]$Arguments = @()
+        [Parameter(ValueFromRemainingArguments)] [object[]]$Arguments = @()
     )
 
     if ($PSBoundParameters.ContainsKey('Account')) {
@@ -485,11 +488,20 @@ function azswap {
         if (-not $Account) { return Write-Error '-Account needs an account, such as user@contoso.com.' }
         if ($Help -or $Command -in '', 'list', 'import', 'help', '--help', 'run') { return Write-Error '-Account works with new, login or a profile name.' }
     }
+    # Each command takes a fixed number of positional words; the first two bind to $Target and
+    # $Tenant, the rest to $Arguments. 'run' checks its own.
+    $positional = @('Target', 'Tenant' | Where-Object { $PSBoundParameters.ContainsKey($_) }).Count + $Arguments.Count
+    $usage = switch ($Command) {
+        { $_ -in '', 'list', 'login', 'import', 'help', '--help' } { if ($positional) { "azswap $Command".Trim() } }
+        'new' { if ($positional -gt 2) { 'azswap new <profile> <tenant>' } }
+        'run' { }
+        default { if ($positional) { 'azswap <profile>' } }
+    }
+    if ($usage) { return Write-Error "Too many arguments. Usage: $usage (run 'azswap help' for options)" }
     if ($Help -or $Command -in 'help', '--help') { return $script:Usage }
     if ($Interactive -and $DeviceCode) { return Write-Error 'Use -Interactive or -DeviceCode, not both.' }
     # 'new' and 'login' remember an explicit method once a sign-in with it succeeds.
     $method = if ($Interactive) { 'interactive' } elseif ($DeviceCode) { 'devicecode' }
-    if ($Arguments -and $Command -ne 'run') { return Write-Error "Unexpected argument(s): $($Arguments -join ' '). Run 'azswap help'." }
     $accountArg = if ($Account) { @{ Account = $Account } } else { @{} }
 
     switch ($Command) {
@@ -573,12 +585,30 @@ function azswap {
             return
         }
         'run' {
-            # After '--' everything binds positionally, so the command's first word lands in
-            # $Tenant and the rest in $Arguments, verbatim.
-            if (-not $Target -or -not $Tenant) { return Write-Error 'Usage: azswap run <profile> -- <command> [args...]' }
+            # After '--' everything binds positionally: the command's name lands in $Tenant and
+            # its arguments in $Arguments. Every failure goes through $PSCmdlet with $LASTEXITCODE 1,
+            # so the azswap call itself fails ($? is false, pwsh -Command exits 1).
+            $fail = {
+                param($Message, $Id, $Code = 1)
+                $global:LASTEXITCODE = $Code
+                $PSCmdlet.WriteError([Management.Automation.ErrorRecord]::new([Exception]::new($Message), $Id, 'InvalidArgument', $Target))
+            }
+            if (-not $Target -or -not $Tenant -or $Apply -or $FromDefault -or $Only) {
+                return & $fail 'Usage: azswap run <profile> [-Interactive|-DeviceCode] [-NoLogin] -- <command> [args...]' 'AzswapRunUsage'
+            }
             $dir = Join-Path (Get-AzswapRoot) ".azure-$Target"
             if (-not (Test-Path (Join-Path $dir 'azswap-tenant'))) {
-                return Write-Error "Unknown profile '$Target'. Run 'azswap list', or 'azswap new $Target <tenant>'."
+                return & $fail "Unknown profile '$Target'. Run 'azswap list', or 'azswap new $Target <tenant>'." 'AzswapUnknownProfile'
+            }
+            # Executables only: a PowerShell command would bind '-Switch' arguments as plain strings,
+            # silently. An executable wins over a same-named script, alias or function, so npm-style
+            # shims (func.ps1 beside func.cmd) run the executable.
+            $exe = Get-Command $Tenant -CommandType Application -ErrorAction Ignore | Select-Object -First 1
+            $cmd = Get-Command $Tenant -ErrorAction Ignore | Select-Object -First 1
+            if (-not $exe -and -not $cmd) { return & $fail "Command not found: '$Tenant'." 'AzswapRunCommandNotFound' }
+            if (-not $exe) {
+                return & $fail ("'$Tenant' is a PowerShell command ($($cmd.CommandType)), and 'azswap run' only runs executables. " +
+                    "Wrap it in a new PowerShell process: azswap run $Target -- pwsh -NoProfile -File <script> [args...] (or -Command)") 'AzswapRunNotExecutable'
             }
             $previous = $env:AZURE_CONFIG_DIR
             try {
@@ -591,10 +621,12 @@ function azswap {
                     $signedIn = $true
                 }
                 if (-not (Test-AzswapAccount -Dir $dir -SignedIn:$signedIn)) {
-                    $global:LASTEXITCODE = 1
-                    return Write-Error "Wrong account for '$Target', so '$Tenant' was not run."
+                    return & $fail "Wrong account for '$Target', so '$Tenant' was not run." 'AzswapWrongAccount'
                 }
-                & $Tenant @Arguments
+                & $exe.Source @Arguments
+                if ($LASTEXITCODE -ne 0) {
+                    & $fail "'$Tenant' exited with code $LASTEXITCODE." 'AzswapRunCommandFailed' $LASTEXITCODE
+                }
             } finally {
                 $env:AZURE_CONFIG_DIR = $previous
             }
