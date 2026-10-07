@@ -202,10 +202,10 @@ Describe 'azswap import' {
             BeforeEach {
                 Get-ChildItem $TestDrive -Force | Remove-Item -Recurse -Force
                 New-AzFolder '.azure' @(
-                    @('azx.me@leeds.gov.uk', 'T1', $true),
-                    @('JPitts@trueNorthIT.co.uk', 'T1', $false),
-                    @('adm@truenorthit.co.uk', 'T3', $false),
-                    @('me@nhs.net', 'T2', $false)
+                    @('me@woodgrove.com', 'T1', $true),
+                    @('Pat@Fabrikam.com', 'T1', $false),
+                    @('admin@fabrikam.com', 'T3', $false),
+                    @('me@northwindtraders.com', 'T2', $false)
                 ) | Out-Null
                 function New-Profile($Name, $Tenant) {
                     $dir = Join-Path $TestDrive ".azure-$Name"
@@ -214,33 +214,33 @@ Describe 'azswap import' {
                     $dir
                 }
                 # Covered through its azureProfile.json, which has no azswap-account.
-                $lcc = New-AzFolder '.azure-lcc' @(, @('AZX.me@leeds.gov.uk', 'T1', $true))
-                Set-Content (Join-Path $lcc 'azswap-tenant') 'T1'
+                $wg = New-AzFolder '.azure-wg' @(, @('ME@woodgrove.com', 'T1', $true))
+                Set-Content (Join-Path $wg 'azswap-tenant') 'T1'
                 # Never signed in: same tenant, account unknown.
-                New-Profile lcc-tnit T1 | Out-Null
-                New-Profile nhs T2 | Out-Null
-                New-Profile nhs2 T2 | Out-Null
+                New-Profile wg-ops T1 | Out-Null
+                New-Profile northwind T2 | Out-Null
+                New-Profile northwind2 T2 | Out-Null
                 # Covered through azswap-account (case-insensitive), never signed in.
-                Set-Content (Join-Path (New-Profile tnit T3) 'azswap-account') 'ADM@TrueNorthIT.co.uk'
+                Set-Content (Join-Path (New-Profile fab T3) 'azswap-account') 'ADMIN@Fabrikam.com'
             }
 
             It 'shows covered identities as existing and skips unconfirmed ones' {
                 $rows = azswap import -FromDefault -Apply
-                (Get-Row $rows leeds).Status | Should -Be 'exists: lcc'
-                (Get-Row $rows truenorthit-adm).Status | Should -Be 'exists: tnit'
-                (Get-Row $rows truenorthit-jpitts).Status |
-                    Should -Be "skipped: tenant already has profile 'lcc-tnit' (account unknown; sign in to it, or use -Only to create anyway)"
-                (Get-Row $rows nhs).Status | Should -Match "^skipped: tenant already has profile 'nhs', 'nhs2' \(account unknown"
+                (Get-Row $rows woodgrove).Status | Should -Be 'exists: wg'
+                (Get-Row $rows fabrikam-admin).Status | Should -Be 'exists: fab'
+                (Get-Row $rows fabrikam-pat).Status |
+                    Should -Be "skipped: tenant already has profile 'wg-ops' (account unknown; sign in to it, or use -Only to create anyway)"
+                (Get-Row $rows northwindtraders).Status | Should -Match "^skipped: tenant already has profile 'northwind', 'northwind2' \(account unknown"
                 (Get-ChildItem $TestDrive -Force -Filter '.azure-*').Name | Sort-Object |
-                    Should -Be @('.azure-lcc', '.azure-lcc-tnit', '.azure-nhs', '.azure-nhs2', '.azure-tnit')
+                    Should -Be @('.azure-fab', '.azure-northwind', '.azure-northwind2', '.azure-wg', '.azure-wg-ops')
             }
 
             It 'creates an unconfirmed identity named in -Only, but never a covered one' {
-                $rows = azswap import -FromDefault -Only truenorthit-jpitts, leeds -Apply
-                (Get-Row $rows truenorthit-jpitts).Status | Should -Match '^created'
-                Get-Content (Join-Path $TestDrive '.azure-truenorthit-jpitts\azswap-account') | Should -Be 'JPitts@trueNorthIT.co.uk'
-                (Get-Row $rows leeds).Status | Should -Be 'exists: lcc'
-                Test-Path (Join-Path $TestDrive '.azure-leeds') | Should -BeFalse
+                $rows = azswap import -FromDefault -Only fabrikam-pat, woodgrove -Apply
+                (Get-Row $rows fabrikam-pat).Status | Should -Match '^created'
+                Get-Content (Join-Path $TestDrive '.azure-fabrikam-pat\azswap-account') | Should -Be 'Pat@Fabrikam.com'
+                (Get-Row $rows woodgrove).Status | Should -Be 'exists: wg'
+                Test-Path (Join-Path $TestDrive '.azure-woodgrove') | Should -BeFalse
             }
         }
 

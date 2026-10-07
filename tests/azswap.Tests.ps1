@@ -159,12 +159,12 @@ Describe 'azswap' {
     Context 'tab completion' {
         It 'completes commands and profile names' {
             New-TestProfile contoso 'tid-1' | Out-Null
-            New-TestProfile lcc 'tid-2' | Out-Null
+            New-TestProfile lab 'tid-2' | Out-Null
             $all = (TabExpansion2 -inputScript 'azswap ' -cursorColumn 7).CompletionMatches.CompletionText
-            $all | Should -Be @('list', 'new', 'login', 'help', 'import', 'contoso', 'lcc')
+            $all | Should -Be @('list', 'new', 'login', 'help', 'import', 'contoso', 'lab')
 
             $l = (TabExpansion2 -inputScript 'azswap l' -cursorColumn 8).CompletionMatches.CompletionText
-            $l | Should -Be @('list', 'login', 'lcc')
+            $l | Should -Be @('list', 'login', 'lab')
         }
     }
 }
