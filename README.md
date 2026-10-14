@@ -245,8 +245,10 @@ azswap contoso                                              # then sign in to ea
 ```
 
 There is one suggestion per account and tenant. The name comes from the tenant's domain
-if az recorded it, otherwise from the account's domain; two accounts in one tenant get
-the account name added (`fabrikam-me`, `fabrikam-admin`). `-Apply` creates an empty
+if az recorded it, otherwise from the account's domain. Where two suggestions would share
+a name, they get what tells them apart: two accounts get the account name added
+(`fabrikam-me`, `fabrikam-admin`), and one account in two tenants gets the start of each
+tenant id (`fabrikam-1a2b3c4d`). `-Apply` creates an empty
 profile folder with the tenant and account recorded, and prints the `azswap <profile>`
 command to sign in with. Tokens are deliberately not copied, so `~/.azure` is left as it
 is. Names that clash with an existing folder or a command are skipped.
