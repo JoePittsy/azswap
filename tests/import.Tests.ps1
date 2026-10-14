@@ -198,6 +198,49 @@ Describe 'azswap import' {
                 Should -Be @('.azure-contosoltd', '.azure-fabrikam-me')
         }
 
+        It 'uses the whole account when two accounts in one tenant share a local part' {
+            Get-ChildItem $TestDrive -Force | Remove-Item -Recurse -Force
+            New-AzFolder '.azure' @(
+                @('me@a.example', 'tid-c', $true, 'contoso.onmicrosoft.com'),
+                @('me@b.example', 'tid-c', $false, 'contoso.onmicrosoft.com')
+            ) | Out-Null
+            $rows = azswap import -FromDefault
+            (Get-Row $rows contoso-me-a-example).Account | Should -Be 'me@a.example'
+            (Get-Row $rows contoso-me-b-example).Account | Should -Be 'me@b.example'
+            $rows.Status | Should -Be @('would create', 'would create')
+        }
+
+        Context 'one account in several tenants' {
+            BeforeEach {
+                Get-ChildItem $TestDrive -Force | Remove-Item -Recurse -Force
+                $script:ta = '1a2b3c4d-1111-2222-3333-444455556666'
+                $script:tb = '5e6f7a8b-1111-2222-3333-444455556666'
+            }
+
+            It 'adds the start of the tenant id when az recorded no tenant domain' {
+                New-AzFolder '.azure' @(@('me@acme.example', $tb, $true), @('me@acme.example', $ta, $false)) | Out-Null
+                $rows = azswap import -FromDefault
+                @($rows.Profile) | Sort-Object | Should -Be @('acme-1a2b3c4d', 'acme-5e6f7a8b')
+                $rows.Status | Should -Be @('would create', 'would create')
+                azswap import -FromDefault -Apply | Out-Null
+                Get-Content (Join-Path $TestDrive '.azure-acme-1a2b3c4d\azswap-tenant') | Should -Be $ta
+                Get-Content (Join-Path $TestDrive '.azure-acme-5e6f7a8b\azswap-tenant') | Should -Be $tb
+            }
+
+            It 'adds the account and the tenant where both are needed' {
+                New-AzFolder '.azure' @(
+                    @('me@acme.example', $ta, $true),
+                    @('me@acme.example', $tb, $false),
+                    @('admin@acme.example', $ta, $false)
+                ) | Out-Null
+                $rows = azswap import -FromDefault
+                @($rows.Profile) | Sort-Object | Should -Be @('acme-admin', 'acme-me-1a2b3c4d', 'acme-me-5e6f7a8b')
+                (Get-Row $rows acme-me-5e6f7a8b).Tenant | Should -Be $tb
+                (Get-Row $rows acme-admin).Status | Should -Be 'would create'
+                $rows.Status | Should -Not -Match 'skipped'
+            }
+        }
+
         Context 'identities that already have profiles' {
             BeforeEach {
                 Get-ChildItem $TestDrive -Force | Remove-Item -Recurse -Force
