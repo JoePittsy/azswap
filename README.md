@@ -210,6 +210,10 @@ profile's tenant in an `azswap-tenant` file inside it. `azswap <profile>` then:
 3. Prints the signed-in account and subscription, and warns if it isn't the account
    the profile expects.
 
+Accounts with no Azure subscriptions, such as Dataverse-only accounts, sign in too:
+`azswap` passes `--allow-no-subscriptions`, and the subscription then shows as
+`N/A(tenant level account)`.
+
 There's no shared state between shells: each window can use a different profile.
 
 Profile folders live in your home folder. Set the `AZSWAP_HOME` environment variable to

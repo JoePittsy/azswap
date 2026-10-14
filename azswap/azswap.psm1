@@ -348,7 +348,9 @@ function Invoke-AzswapLogin {
     }
     # azswap rejects -Interactive with -DeviceCode before it gets here.
     if (-not $Interactive -and -not $DeviceCode) { $Interactive = (Get-AzswapSetting -Dir $Dir -Name 'login') -eq 'interactive' }
-    $loginArgs = @('login', '--tenant', (Get-AzswapSetting -Dir $Dir -Name 'tenant'), '-o', 'none')
+    # --allow-no-subscriptions lets an account with none (Dataverse only, say) sign in. The login
+    # is limited to one tenant, so it changes nothing for an account that has subscriptions.
+    $loginArgs = @('login', '--tenant', (Get-AzswapSetting -Dir $Dir -Name 'tenant'), '--allow-no-subscriptions', '-o', 'none')
     if (-not $Interactive) { $loginArgs += '--use-device-code' }
     az @loginArgs
     if ($LASTEXITCODE -ne 0) {
