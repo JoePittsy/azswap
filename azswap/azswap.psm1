@@ -106,14 +106,17 @@ function Get-AzswapDefaultIdentity {
             [pscustomobject]@{ Profile = ConvertTo-AzswapName $name; Account = $s.user.name; Tenant = $s.tenantId; Reason = $null; Exists = $null }
         }
     # Identities with the same name: add what tells them apart. Different accounts get the
-    # account's local part (or the start of a service principal's app id); one account in
-    # several tenants gets the start of the tenant id. Mixed groups get both, as needed.
+    # account's local part (or the start of a service principal's app id), or the whole
+    # account when local parts repeat (guests me@a and me@b); one account in several
+    # tenants gets the start of the tenant id. Mixed groups get both, as needed.
     $ids | Group-Object Profile | Where-Object Count -gt 1 | ForEach-Object {
         $group = $_.Group
-        $accounts = @($group.Account | Sort-Object -Unique).Count
+        $accounts = @($group.Account | Sort-Object -Unique)
+        $whole = @($accounts -replace '@.*' | Sort-Object -Unique).Count -lt $accounts.Count
         foreach ($id in $group) {
             $name = $id.Profile
-            if ($accounts -gt 1) { $name += '-' + (($id.Account -replace '@.*') -replace '^([0-9a-f]{8})-[0-9a-f-]{27}$', '$1') }
+            if ($whole) { $name += "-$($id.Account)" }
+            elseif ($accounts.Count -gt 1) { $name += '-' + (($id.Account -replace '@.*') -replace '^([0-9a-f]{8})-[0-9a-f-]{27}$', '$1') }
             if (@($group | Where-Object Account -eq $id.Account).Count -gt 1) { $name += '-' + "$($id.Tenant)".Split('-')[0] }
             $id.Profile = ConvertTo-AzswapName $name
         }

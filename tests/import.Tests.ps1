@@ -198,6 +198,18 @@ Describe 'azswap import' {
                 Should -Be @('.azure-contosoltd', '.azure-fabrikam-me')
         }
 
+        It 'uses the whole account when two accounts in one tenant share a local part' {
+            Get-ChildItem $TestDrive -Force | Remove-Item -Recurse -Force
+            New-AzFolder '.azure' @(
+                @('me@a.example', 'tid-c', $true, 'contoso.onmicrosoft.com'),
+                @('me@b.example', 'tid-c', $false, 'contoso.onmicrosoft.com')
+            ) | Out-Null
+            $rows = azswap import -FromDefault
+            (Get-Row $rows contoso-me-a-example).Account | Should -Be 'me@a.example'
+            (Get-Row $rows contoso-me-b-example).Account | Should -Be 'me@b.example'
+            $rows.Status | Should -Be @('would create', 'would create')
+        }
+
         Context 'one account in several tenants' {
             BeforeEach {
                 Get-ChildItem $TestDrive -Force | Remove-Item -Recurse -Force
