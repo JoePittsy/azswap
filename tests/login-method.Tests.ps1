@@ -29,9 +29,11 @@ BeforeAll {
         if ($null -ne $raw) { $raw.Trim() }
     }
 
+    # Every sign-in passes --allow-no-subscriptions, so accounts with none (Dataverse only) can sign in.
     function Assert-LoginCall([bool]$DeviceCode) {
         Should -Invoke az -ModuleName azswap -Times 1 -Exactly -Scope It -ParameterFilter {
-            $args[0] -eq 'login' -and ($args -contains '--use-device-code') -eq $DeviceCode
+            $args[0] -eq 'login' -and ($args -contains '--use-device-code') -eq $DeviceCode -and
+                $args -contains '--allow-no-subscriptions'
         }
     }
 }
