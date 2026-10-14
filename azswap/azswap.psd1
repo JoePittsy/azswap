@@ -1,6 +1,6 @@
 @{
     RootModule           = 'azswap.psm1'
-    ModuleVersion        = '0.0.3'
+    ModuleVersion        = '0.0.4'
     GUID                 = 'fe50d101-a90f-4f2e-a31e-7b5e9b90e4c2'
     Author               = 'Joe Pitts'
     Copyright            = '(c) Joe Pitts. MIT licence.'
@@ -17,6 +17,10 @@
             LicenseUri = 'https://github.com/JoePittsy/azswap/blob/main/LICENSE'
             ProjectUri = 'https://github.com/JoePittsy/azswap'
             ReleaseNotes = @'
+0.0.4
+- Sign-in passes --allow-no-subscriptions, so accounts with no Azure subscriptions (Dataverse-only accounts, for example) can sign in. Their subscription shows as N/A(tenant level account). Accounts with subscriptions are unaffected.
+- import -FromDefault gives one account in several tenants a separate profile per tenant (the start of the tenant id is added) instead of skipping all but the first. Two accounts whose names before the @ match get the whole account added.
+
 0.0.3
 - -NewWindow (Windows) on a profile switch, login and new opens a new terminal window that does the sign-in there, so you can sign in when an agent or script needs it without leaving the session. Allowed from non-interactive hosts, because the calling process never signs in itself.
 - The refusal message from non-interactive hosts suggests -NewWindow.
